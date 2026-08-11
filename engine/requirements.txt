@@ -1,0 +1,21 @@
+# Python dependencies for the cbcloudscraper worker.
+#
+# Recommended Python: 3.11 (widest prebuilt-wheel coverage; leaves room to swap in
+# cloudscraper25 later, which pins js2py and needs 3.11). The worker also builds and
+# runs on newer 3.x versions where wheels exist for curl_cffi.
+#
+# build-binary.ps1 writes the exact resolved versions to requirements.lock.txt after
+# install, so a build can be reproduced precisely from that lock file.
+
+# Primary engine: real browser TLS/HTTP2 fingerprint impersonation.
+curl_cffi>=0.7,<1.0
+
+# Secondary engine: solves Cloudflare's legacy JavaScript challenge. Pure Python.
+# Swap to cloudscraper25 here if a target needs newer challenge handling.
+cloudscraper==1.2.71
+
+# CA certificate bundle for HTTPS verification (bundled into the binary).
+certifi>=2024.2.2
+
+# Build-time only: produces the standalone executable.
+pyinstaller>=6.0,<7.0

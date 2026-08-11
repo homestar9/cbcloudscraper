@@ -1,5 +1,5 @@
 {
-    "name":"@MODULE_NAME@-lucee@6",
+    "name":"cbcloudscraper-lucee@6",
     "app":{
         "serverHomeDirectory":".engine/lucee6",
         "cfengine":"lucee@6"
@@ -13,7 +13,7 @@
         },
 		"webroot": "test-harness",
 		"aliases":{
-            "/moduleroot/@MODULE_NAME@":"../"
+            "/moduleroot/cbcloudscraper":"../"
         }
     },
     "openBrowser":"false",

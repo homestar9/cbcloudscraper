@@ -19,3 +19,15 @@ modules/**
 
 # log files
 logs/**
+
+# Built binary: never committed. It is downloaded from GitHub Releases on first use
+# (see models/BinaryProvisioner.cfc), or built locally with build/build-binary.ps1.
+bin/**
+
+# Python worker: virtual environment and build artifacts
+engine/.venv/**
+engine/build/**
+engine/dist/**
+**/__pycache__/**
+build/.pyi-work/**
+build/.pyi-dist/**

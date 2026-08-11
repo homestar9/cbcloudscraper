@@ -1,0 +1,44 @@
+{
+    "templateVersion":"1.0.0",
+    "projectType":"module",
+    "branch":"master",
+    "changelog":"changelog.md",
+    "testRunner":"http://localhost:60299/tests/runner.cfm",
+    "runTests":true,
+    "publish":{
+        "forgebox":true,
+        "github":true
+    },
+    "excludes":[
+        "^build$",
+        "^modules$",
+        "^node_modules$",
+        "^resources$",
+        "^test-harness$",
+        "^tests$",
+        "^test-results$",
+        "^temp$",
+        "^plans$",
+        "^(package|package-lock)\\.json$",
+        "^(webpack|vite|vitest)\\.config\\.js$",
+        "^docker-compose\\.yml$",
+        "^server(?:-.*)?\\.json$",
+        "^.*\\.code-workspace$",
+        "^(AGENTS|CLAUDE|DEVNOTES|RELEASE)\\.md$",
+        "\\.bak$",
+        "\\.(zip|tar|tar\\.gz|tgz|7z|rar)$",
+        "^\\..*"
+    ],
+    "excludesAdd":[
+        "^engine$",
+        "^bin$"
+    ],
+    "engines":[
+        { "name":"Lucee 5", "configFile":"server-lucee@5.json" },
+        { "name":"Lucee 6", "configFile":"server-lucee@6.json" },
+        { "name":"Adobe 2023", "configFile":"server-adobe@2023.json" },
+        { "name":"Adobe 2025", "configFile":"server-adobe@2025.json" },
+        { "name":"BoxLang", "configFile":"server-boxlang@1.json" },
+        { "name":"BoxLang CFML", "configFile":"server-boxlang-cfml@1.json" }
+    ]
+}

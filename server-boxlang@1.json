@@ -1,5 +1,5 @@
 {
-	"name":"@MODULE_NAME@-boxlang@1",
+	"name":"cbcloudscraper-boxlang@1",
     "app":{
         "serverHomeDirectory":".engine/boxlang",
         "cfengine":"boxlang@1"
@@ -13,7 +13,7 @@
         },
 		"webroot": "test-harness",
 		"aliases":{
-            "/moduleroot/@MODULE_NAME@":"../"
+            "/moduleroot/cbcloudscraper":"../"
         }
     },
     "JVM":{

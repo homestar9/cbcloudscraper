@@ -1,56 +1,60 @@
 {
-	"name" 		: "@MODULE_NAME@",
-	"version"   : "1.0.0",
-    "location"  : "https://downloads.ortussolutions.com/ortussolutions/coldbox-modules/@MODULE_SLUG@/@build.version@/@MODULE_SLUG@-@build.version@.zip",
-	"author" 	: "Ortus Solutions <info@ortussolutions.com>",
-	"homepage"	: "https://github.com/coldbox-modules/@MODULE_SLUG@",
-	"documentation"		: "https://github.com/coldbox-modules/@MODULE_SLUG@",
-	"repository"		: { "type" : "git", "url" : "https://github.com/coldbox-modules/@MODULE_SLUG@" },
-	"bugs" : "https://github.com/coldbox-modules/@MODULE_SLUG@",
-	"shortDescription"	: "Description goes here",
-	"slug"		: "@MODULE_SLUG@",
-	"type"		: "modules",
-	"keywords":"",
-	"license"			: [
-		{ "type" : "Apache2", "url" : "http://www.apache.org/licenses/LICENSE-2.0.html" }
+	"name"          : "cbcloudscraper",
+	"version"       : "1.0.0",
+	"location"      : "ForgeboxStorage",
+	"author"        : "Angry Sam Productions, Inc. <dave@angrysam.com>",
+	"homepage"      : "https://github.com/homestar9/cbcloudscraper",
+	"documentation" : "https://github.com/homestar9/cbcloudscraper",
+	"repository"    : { "type" : "git", "url" : "https://github.com/homestar9/cbcloudscraper" },
+	"bugs"          : "https://github.com/homestar9/cbcloudscraper/issues",
+	"shortDescription" : "Make HTTP requests through Cloudflare protection in ColdBox using cloudscraper and curl_cffi.",
+	"slug"          : "cbcloudscraper",
+	"type"          : "modules",
+	"keywords"      : "cloudflare,scraper,http,cfhttp,curl_cffi,cloudscraper,bot-protection,web-scraping",
+	"license"       : [
+		{ "type" : "Apache-2.0", "url" : "https://www.apache.org/licenses/LICENSE-2.0" }
 	],
-	"contributors"		: [
-	],
-	"dependencies" 	:{
+	"contributors"  : [],
+	"dependencies"  : {},
+	"devDependencies" : {
+		"commandbox-boxlang"  : "*",
+		"commandbox-cfformat" : "*"
 	},
-	"devDependencies" 	:{
-		"commandbox-boxlang":"*",
-		"commandbox-cfformat":"*",
-        "commandbox-docbox":"*"
-	},
-	"ignore":[
-        "**/.*",
-        "test-harness",
+	"ignore" : [
+		"**/.*",
+		"test-harness",
+		"engine",
+		"bin",
+		"build",
 		"/server*.json"
-    ],
-	"scripts":{
-		"setupTemplate": "task run taskFile=build/SetupTemplate.cfc",
-		"build:module":"task run taskFile=build/Build.cfc :projectName=`package show slug` :version=`package show version`",
-		"build:docs":"task run taskFile=build/Build.cfc target=docs :projectName=`package show slug` :version=`package show version`",
-        "install:dependencies":"install && cd test-harness && install",
-		"release":"recipe build/release.boxr",
-        "format":"cfformat run helpers,models,test-harness/tests/,ModuleConfig.cfc --overwrite",
-        "format:watch":"cfformat watch helpers,models,test-harness/tests/,ModuleConfig.cfc ./.cfformat.json",
-        "format:check":"cfformat check helpers,models,test-harness/tests/,ModuleConfig.cfc ./.cfformat.json",
-		"start:boxlang" : "server start serverConfigFile=server-boxlang-cfml@1.json",
-		"start:lucee" : "server start serverConfigFile=server-lucee@5.json",
-		"start:2023" : "server start serverConfigFile=server-adobe@2023.json",
-		"stop:boxlang" : "server stop serverConfigFile=server-boxlang-cfml@1.json",
-		"stop:lucee" : "server stop serverConfigFile=server-lucee@5.json",
-		"stop:2023" : "server stop serverConfigFile=server-adobe@2023.json",
-		"logs:boxlang" : "server log serverConfigFile=server-boxlang-cfml@1.json",
-		"logs:lucee" : "server log serverConfigFile=server-lucee@5.json --follow",
-		"logs:2023" : "server log serverConfigFile=server-adobe@2023.json --follow",
-		"forget:lucee" : "server forget serverConfigFile=server-lucee@5.json",
-		"forget:2023" : "server forget serverConfigFile=server-adobe@2023.json",
-        "forget:boxlang" : "server forget serverConfigFile=server-boxlang-cfml@1.json"
-    },
-	"testbox":{
-        "runner":"http://localhost:60299/tests/runner.cfm"
-    }
+	],
+	"scripts" : {
+		"release"              : "task run taskFile=build/Release.cfc target=run :version=`package show version`",
+		"release:check"        : "task run taskFile=build/Doctor.cfc",
+		"release:dryrun"       : "task run taskFile=build/Release.cfc target=run :version=`package show version` :dryRun=true",
+		"release:existing-tag" : "task run taskFile=build/Release.cfc target=run :version=`package show version` :existingTag=true",
+		"release:skip-tests"   : "task run taskFile=build/Release.cfc target=run :version=`package show version` :skipTests=true",
+		"release:hotfix"       : "task run taskFile=build/Release.cfc target=run :version=`package show version` :skipTests=true",
+		"test:engines"         : "task run taskFile=build/TestEngines.cfc",
+		"bump:major"           : "task run taskFile=build/Bump.cfc :level=major",
+		"bump:minor"           : "task run taskFile=build/Bump.cfc :level=minor",
+		"bump:patch"           : "task run taskFile=build/Bump.cfc :level=patch",
+		"bump:prerelease"      : "task run taskFile=build/Bump.cfc :level=prerelease",
+		"bump:beta"            : "task run taskFile=build/Bump.cfc :level=preminor :preid=beta",
+		"bump:alpha"           : "task run taskFile=build/Bump.cfc :level=preminor :preid=alpha",
+		"build:package"        : "task run taskFile=build/Build.cfc :projectName=`package show slug` :version=`package show version`",
+		"format"               : "cfformat run models,ModuleConfig.cfc,test-harness/tests/ --overwrite",
+		"format:watch"         : "cfformat watch models,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
+		"format:check"         : "cfformat check models,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
+		"start:lucee"          : "server start serverConfigFile=server-lucee@5.json",
+		"start:2023"           : "server start serverConfigFile=server-adobe@2023.json",
+		"start:boxlang"        : "server start serverConfigFile=server-boxlang-cfml@1.json",
+		"stop:lucee"           : "server stop serverConfigFile=server-lucee@5.json",
+		"stop:2023"            : "server stop serverConfigFile=server-adobe@2023.json",
+		"stop:boxlang"         : "server stop serverConfigFile=server-boxlang-cfml@1.json",
+		"logs:lucee"           : "server log serverConfigFile=server-lucee@5.json --follow"
+	},
+	"testbox" : {
+		"runner" : "http://localhost:60299/tests/runner.cfm"
+	}
 }

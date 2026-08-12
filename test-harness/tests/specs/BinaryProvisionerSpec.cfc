@@ -1,10 +1,10 @@
 /**
  * Tests for BinaryProvisioner.
  *
- * These are hermetic: they never reach the network. They cover the resolution paths that
- * do not require a download — an explicitly configured binary, a missing explicit binary,
- * and the "auto-download turned off" error. The real download path is verified by hand
- * against a published GitHub Release (see the plan's verification steps).
+ * These are hermetic: they never reach the network. They cover the resolution paths that do
+ * not require a download — an explicit binary, a missing explicit binary, the "auto-download
+ * off" error, and the version-stamp decision (a matching stamp is current, a stale one is not).
+ * The real download path is verified by hand against a published GitHub Release.
  */
 component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
@@ -21,6 +21,16 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 		var localBinary    = expandPath( "/cbcloudscraper/bin/win64/cbcloudscraper.exe" );
 		var hasLocalBinary = fileExists( localBinary );
 
+		// Create a fake win64 binary (and optional version stamp) under a base directory.
+		var stageBinary = function( required string baseDir, string tag = "" ){
+			var platformDir = arguments.baseDir & "/win64";
+			directoryCreate( platformDir, true, true );
+			fileWrite( platformDir & "/cbcloudscraper.exe", "not a real binary" );
+			if ( len( arguments.tag ) ) {
+				fileWrite( platformDir & "/.cbcloudscraper-version", arguments.tag );
+			}
+		};
+
 		describe( "BinaryProvisioner", function(){
 			var provisioner = "";
 			var settings    = "";
@@ -33,6 +43,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				saved       = {
 					"binaryPath"         : settings.binaryPath,
 					"binaryDirectory"    : settings.binaryDirectory,
+					"binaryReleaseTag"   : settings.binaryReleaseTag,
 					"autoDownloadBinary" : settings.autoDownloadBinary
 				};
 			} );
@@ -40,6 +51,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			afterEach( function(){
 				settings.binaryPath         = saved.binaryPath;
 				settings.binaryDirectory    = saved.binaryDirectory;
+				settings.binaryReleaseTag   = saved.binaryReleaseTag;
 				settings.autoDownloadBinary = saved.autoDownloadBinary;
 			} );
 
@@ -61,8 +73,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				} ).toThrow( type = "cbcloudscraper.BinaryUnavailable" );
 			} );
 
-			it( "throws with manual instructions when auto-download is off and no binary is present", function(){
-				// Point at an empty directory so no cached binary is found, and disable download.
+			it( "throws when auto-download is off and no binary is present", function(){
 				var emptyDir = getTempDirectory() & "cbcs-empty-" & createUUID();
 				directoryCreate( emptyDir, true, true );
 				try {
@@ -77,8 +88,63 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				}
 			} );
 
+			it( "treats a binary with a matching version stamp as current (no download)", function(){
+				var dir = getTempDirectory() & "cbcs-stamp-" & createUUID();
+				stageBinary( dir, "v1.0.0" );
+				try {
+					settings.binaryPath         = "";
+					settings.binaryDirectory    = dir;
+					settings.binaryReleaseTag   = "v1.0.0";
+					settings.autoDownloadBinary = false; // proves it did not download
+					var resolved                = replace( provisioner.ensureBinary(), "\", "/", "all" );
+					expect( resolved ).toBe(
+						replace(
+							dir & "/win64/cbcloudscraper.exe",
+							"\",
+							"/",
+							"all"
+						)
+					);
+				} finally {
+					directoryDelete( dir, true );
+				}
+			} );
+
+			it( "treats a binary with a stale version stamp as not current", function(){
+				var dir = getTempDirectory() & "cbcs-stale-" & createUUID();
+				stageBinary( dir, "v0.0.1" ); // older than the wanted tag
+				try {
+					settings.binaryPath         = "";
+					settings.binaryDirectory    = dir;
+					settings.binaryReleaseTag   = "v1.0.0";
+					settings.autoDownloadBinary = false; // so a stale binary surfaces as an error
+					expect( function(){
+						provisioner.ensureBinary();
+					} ).toThrow( type = "cbcloudscraper.BinaryUnavailable" );
+				} finally {
+					directoryDelete( dir, true );
+				}
+			} );
+
+			it( "status() reports the installed and wanted versions and in-sync state", function(){
+				var dir = getTempDirectory() & "cbcs-status-" & createUUID();
+				stageBinary( dir, "v1.0.0" );
+				try {
+					settings.binaryPath       = "";
+					settings.binaryDirectory  = dir;
+					settings.binaryReleaseTag = "v1.0.0";
+					var report                = provisioner.status();
+					expect( report.present ).toBeTrue();
+					expect( report.installedTag ).toBe( "v1.0.0" );
+					expect( report.targetTag ).toBe( "v1.0.0" );
+					expect( report.inSync ).toBeTrue();
+				} finally {
+					directoryDelete( dir, true );
+				}
+			} );
+
 			it(
-				title = "returns the locally built binary without downloading (when it exists)",
+				title = "returns the locally built (unstamped) binary without downloading",
 				skip  = !hasLocalBinary,
 				body  = function(){
 					settings.binaryPath      = "";

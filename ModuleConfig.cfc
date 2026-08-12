@@ -39,7 +39,7 @@ component {
 			"binaryPath"             : "", // "" = auto-resolve and download when missing
 			"binaryDirectory"        : "", // "" = the module's own bin/ folder
 			"autoDownloadBinary"     : true, // false = require a pre-placed binary
-			"binaryBaseURL"          : "https://github.com/homestar9/cbcloudscraper/releases/download",
+			"binaryBaseURL"          : "", // "" = derive from box.json repository.url
 			"binaryReleaseTag"       : "", // "" = derive "v" + the module version
 			"verifyChecksum"         : true,
 			// ── Request defaults ───────────────────────────────────────────────────

@@ -82,6 +82,16 @@ component singleton accessors="true" {
 	}
 
 	/**
+	 * Pre-fetch the executable now (downloading it if needed) without making a request. Useful
+	 * at application startup or from a scheduled task so the first real request is not delayed.
+	 *
+	 * @return The absolute path to the ready-to-run executable.
+	 */
+	string function warmup(){
+		return binaryProvisioner.ensureBinary();
+	}
+
+	/**
 	 * Run a fully prepared request. Both get() and post() call this. Use it directly only
 	 * when you have built the request struct yourself.
 	 *

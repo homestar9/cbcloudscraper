@@ -1,25 +1,29 @@
 /**
  * Makes sure the cbcloudscraper executable is present, downloading it if needed.
  *
- * The binary is not stored in the git repository. It is published as a per-platform asset
- * on the module's GitHub Releases. The first time a request runs, this component checks
- * for the binary and, if it is missing, downloads the build that matches the current
- * operating system, verifies its checksum, and unpacks it. Every later request finds the
- * binary already in place and returns immediately. This is the same approach the
- * commandbox-cfformat module uses for its native helper.
+ * The binary is not stored in the git repository. It is published as a per-platform asset on
+ * the module's GitHub Releases. The first time a request runs, this component checks for the
+ * binary and, if it is missing or is for a different module version, downloads the build that
+ * matches the current operating system, verifies its checksum, and unpacks it. Every later
+ * request finds the correct binary already in place and returns immediately. This follows the
+ * approach the commandbox-cfformat module uses for its native helper.
+ *
+ * The download itself lives in BinaryDownloader, a plain component shared with the CommandBox
+ * task (tasks/Binary.cfc) so the app and the CLI behave identically.
  *
  * A host application can skip all of this by setting the "binaryPath" module setting to an
  * executable it placed itself (useful on servers with no outbound internet access).
  */
 component singleton accessors="true" {
 
-	property name="settings" inject="coldbox:moduleSettings:cbcloudscraper";
-	property name="logger"   inject="logbox:logger:{this}";
+	property name="settings"   inject="coldbox:moduleSettings:cbcloudscraper";
+	property name="downloader" inject="BinaryDownloader@cbcloudscraper";
+	property name="logger"     inject="logbox:logger:{this}";
 
 	/**
 	 * Return the absolute path to a ready-to-run executable, downloading it if necessary.
-	 * Throws cbcloudscraper.BinaryUnavailable when the binary is missing and cannot be
-	 * obtained (download turned off, no network, or a checksum mismatch).
+	 * Throws cbcloudscraper.BinaryUnavailable when the binary is missing or out of date and
+	 * cannot be obtained (download turned off, no network, or a checksum mismatch).
 	 */
 	string function ensureBinary(){
 		// 1. An explicit path always wins. The host placed the binary itself.
@@ -35,245 +39,122 @@ component singleton accessors="true" {
 			);
 		}
 
-		var platform   = getPlatform();
-		var targetDir  = getBinaryDirectory() & "/" & platform.dir;
-		var binaryFile = targetDir & "/" & platform.exe;
+		var baseDir = getBinaryDirectory();
+		var tag     = getReleaseTag();
 
-		// 2. Already present (a prior download, or a local build during development).
-		if ( fileExists( binaryFile ) ) {
-			return binaryFile;
+		// 2. The correct version is already present (a prior download, or a local dev build).
+		if ( downloader.isCurrent( baseDir, tag ) ) {
+			return downloader.binaryPathFor( baseDir );
 		}
 
-		// 3. Not present. Either download it or fail with clear instructions.
+		// 3. Not current. Either download it or fail with a clear message.
 		if ( !( settings.autoDownloadBinary ?: true ) ) {
 			throw(
 				type    = "cbcloudscraper.BinaryUnavailable",
-				message = "The cbcloudscraper binary is missing and automatic download is turned off.",
-				detail  = manualInstructions( platform, binaryFile )
+				message = missingMessage( baseDir, tag ),
+				detail  = "Automatic download is turned off (autoDownloadBinary=false). " & manualInstructions(
+					baseDir
+				)
 			);
 		}
 
-		// One request at a time may download; the rest wait and then find the file present.
-		lock name="cbcloudscraper-binary-#platform.dir#" type="exclusive" timeout="300" {
-			if ( fileExists( binaryFile ) ) {
-				return binaryFile;
+		// One request at a time downloads; the rest wait and then find the file in place.
+		lock name="cbcloudscraper-binary-#hash( baseDir, "MD5" )#" type="exclusive" timeout="300" {
+			if ( downloader.isCurrent( baseDir, tag ) ) {
+				return downloader.binaryPathFor( baseDir );
 			}
-			downloadBinary( platform, targetDir, binaryFile );
+			downloader.ensure(
+				baseDir        = baseDir,
+				tag            = tag,
+				baseURL        = getBaseURL(),
+				verifyChecksum = ( settings.verifyChecksum ?: true ),
+				force          = false,
+				log            = logCallback()
+			);
 		}
 
-		return binaryFile;
+		return downloader.binaryPathFor( baseDir );
+	}
+
+	/**
+	 * Download the binary for the current module version, replacing any cached copy. Used by the
+	 * CommandBox task and available to app code that wants to pre-install at startup.
+	 *
+	 * @force Download even when the cache already matches the wanted version.
+	 *
+	 * @return The BinaryDownloader result struct { action, path, tag, present }.
+	 */
+	struct function install( boolean force = true ){
+		return downloader.ensure(
+			baseDir        = getBinaryDirectory(),
+			tag            = getReleaseTag(),
+			baseURL        = getBaseURL(),
+			verifyChecksum = ( settings.verifyChecksum ?: true ),
+			force          = arguments.force,
+			log            = logCallback()
+		);
+	}
+
+	/**
+	 * Report the state of the cached binary without downloading anything.
+	 *
+	 * @return struct { present, installedTag, moduleTag, targetTag, inSync, path }.
+	 */
+	struct function status(){
+		var baseDir = getBinaryDirectory();
+		var tag     = getReleaseTag();
+		return {
+			"present"      : downloader.isPresent( baseDir ),
+			"installedTag" : downloader.installedTag( baseDir ),
+			"moduleTag"    : "v" & downloader.readModuleVersion( getModuleRoot() ),
+			"targetTag"    : tag,
+			"inSync"       : downloader.isCurrent( baseDir, tag ),
+			"path"         : downloader.binaryPathFor( baseDir )
+		};
 	}
 
 	/************************* PRIVATE HELPERS *************************/
 
-	/**
-	 * Download the platform's release asset, verify its checksum, and unpack it so that
-	 * binaryFile exists afterward. Throws cbcloudscraper.BinaryUnavailable on any failure.
-	 */
-	private void function downloadBinary(
-		required struct platform,
-		required string targetDir,
-		required string binaryFile
-	){
-		var tag      = getReleaseTag();
-		var baseURL  = reReplace( settings.binaryBaseURL, "/$", "" );
-		var zipURL   = baseURL & "/" & tag & "/" & arguments.platform.asset;
-		var stageDir = ( settings.workingDirectory ?: getTempDirectory() ) & "/binary-download";
-		var zipPath  = stageDir & "/" & arguments.platform.asset;
-
-		if ( !directoryExists( stageDir ) ) {
-			directoryCreate( stageDir, true, true );
-		}
-
-		logger.info( "cbcloudscraper downloading binary from " & zipURL );
-
-		// Download the zip to disk.
-		try {
-			cfhttp(
-				url         = zipURL,
-				method      = "GET",
-				getAsBinary = "yes",
-				path        = stageDir,
-				file        = arguments.platform.asset,
-				timeout     = 180,
-				result      = "local.httpResult"
-			);
-		} catch ( any e ) {
-			throw(
-				type    = "cbcloudscraper.BinaryUnavailable",
-				message = "Could not download the cbcloudscraper binary.",
-				detail  = "Downloading " & zipURL & " failed: " & e.message & ". " & manualInstructions(
-					arguments.platform,
-					arguments.binaryFile
-				)
-			);
-		}
-
-		if ( ( local.httpResult.status_code ?: 0 ) != 200 || !fileExists( zipPath ) ) {
-			throw(
-				type    = "cbcloudscraper.BinaryUnavailable",
-				message = "Could not download the cbcloudscraper binary.",
-				detail  = "Requesting " & zipURL & " returned status " & ( local.httpResult.status_code ?: "unknown" ) & ". " & manualInstructions(
-					arguments.platform,
-					arguments.binaryFile
-				)
-			);
-		}
-
-		// Verify the checksum unless turned off.
-		if ( settings.verifyChecksum ?: true ) {
-			verifyChecksum( zipURL, zipPath );
-		}
-
-		// Unpack into the platform directory.
-		if ( !directoryExists( arguments.targetDir ) ) {
-			directoryCreate( arguments.targetDir, true, true );
-		}
-		cfzip(
-			action      = "unzip",
-			file        = zipPath,
-			destination = arguments.targetDir,
-			overwrite   = true
-		);
-
-		if ( !fileExists( arguments.binaryFile ) ) {
-			throw(
-				type    = "cbcloudscraper.BinaryUnavailable",
-				message = "The downloaded archive did not contain the expected executable.",
-				detail  = "Expected '" & arguments.binaryFile & "' after unpacking " & arguments.platform.asset & ". " & manualInstructions(
-					arguments.platform,
-					arguments.binaryFile
-				)
-			);
-		}
-
-		// On non-Windows systems the file needs the executable bit set.
-		if ( arguments.platform.dir != "win64" ) {
-			createObject( "java", "java.io.File" )
-				.init( arguments.binaryFile )
-				.setExecutable( javacast( "boolean", true ), javacast( "boolean", false ) );
-		}
-
-		// Clean up the downloaded archive.
-		try {
-			fileDelete( zipPath );
-		} catch ( any e ) {
-			logger.debug( "cbcloudscraper could not delete '" & zipPath & "': " & e.message );
-		}
-
-		logger.info( "cbcloudscraper binary ready at " & arguments.binaryFile );
+	private string function getModuleRoot(){
+		return reReplace( expandPath( "/cbcloudscraper" ), "[\\/]$", "" );
 	}
 
-	/**
-	 * Download the ".sha256" companion file and compare it with the archive's hash.
-	 */
-	private void function verifyChecksum( required string zipURL, required string zipPath ){
-		var sumURL   = arguments.zipURL & ".sha256";
-		var expected = "";
-		try {
-			cfhttp(
-				url     = sumURL,
-				method  = "GET",
-				timeout = 60,
-				result  = "local.sumResult"
-			);
-			if ( ( local.sumResult.status_code ?: 0 ) == 200 ) {
-				// The file may be "<hash>" or "<hash>  <filename>"; take the first token.
-				expected = lCase(
-					trim(
-						listFirst( trim( local.sumResult.fileContent ), " " & chr( 9 ) & chr( 10 ) & chr( 13 ) )
-					)
-				);
-			}
-		} catch ( any e ) {
-			logger.debug( "cbcloudscraper checksum file fetch failed: " & e.message );
-		}
-
-		// No checksum published: skip rather than block (verifyChecksum stays best-effort
-		// when the .sha256 asset is absent, but a present-and-wrong checksum always fails).
-		if ( !len( expected ) ) {
-			logger.warn( "cbcloudscraper: no checksum found at " & sumURL & "; skipping verification." );
-			return;
-		}
-
-		var actual = lCase( hash( fileReadBinary( arguments.zipPath ), "SHA-256" ) );
-		if ( actual != expected ) {
-			fileDelete( arguments.zipPath );
-			throw(
-				type    = "cbcloudscraper.BinaryUnavailable",
-				message = "The downloaded cbcloudscraper binary failed its checksum check.",
-				detail  = "Expected SHA-256 " & expected & " but got " & actual & " for " & arguments.zipPath & ". The download was deleted. This can mean a corrupted or tampered file."
-			);
-		}
-	}
-
-	/**
-	 * Return the GitHub Release tag to download from: the configured tag, or "v" plus the
-	 * module's own version read from its box.json.
-	 */
-	private string function getReleaseTag(){
-		var configured = settings.binaryReleaseTag ?: "";
-		if ( len( configured ) ) {
-			return configured;
-		}
-		var version = "1.0.0";
-		try {
-			version = deserializeJSON( fileRead( expandPath( "/cbcloudscraper/box.json" ), "utf-8" ) ).version;
-		} catch ( any e ) {
-			logger.debug( "cbcloudscraper could not read box.json version: " & e.message );
-		}
-		return "v" & version;
-	}
-
-	/**
-	 * Return where downloaded binaries are stored: the configured directory, or the
-	 * module's own bin folder.
-	 */
 	private string function getBinaryDirectory(){
 		var configured = settings.binaryDirectory ?: "";
 		if ( len( configured ) ) {
 			return reReplace( configured, "[\\/]$", "" );
 		}
-		return reReplace(
-			expandPath( "/cbcloudscraper/bin" ),
-			"[\\/]$",
-			""
-		);
+		return getModuleRoot() & "/bin";
 	}
 
-	/**
-	 * Decide the platform folder, executable name, and release asset name for this OS.
-	 */
-	private struct function getPlatform(){
-		var osName = server.os.name;
-		if ( findNoCase( "Windows", osName ) ) {
-			return {
-				"dir"   : "win64",
-				"exe"   : "cbcloudscraper.exe",
-				"asset" : "cbcloudscraper-win64.zip"
-			};
-		}
-		if ( findNoCase( "Mac", osName ) || findNoCase( "Darwin", osName ) ) {
-			return {
-				"dir"   : "mac",
-				"exe"   : "cbcloudscraper",
-				"asset" : "cbcloudscraper-mac.zip"
-			};
-		}
-		return {
-			"dir"   : "linux64",
-			"exe"   : "cbcloudscraper",
-			"asset" : "cbcloudscraper-linux64.zip"
+	private string function getReleaseTag(){
+		return downloader.resolveTag( getModuleRoot(), settings.binaryReleaseTag ?: "" );
+	}
+
+	private string function getBaseURL(){
+		return downloader.deriveBaseURL( getModuleRoot(), settings.binaryBaseURL ?: "" );
+	}
+
+	private any function logCallback(){
+		return function( message ){
+			logger.info( message );
 		};
 	}
 
-	/**
-	 * A message telling a person how to place the binary by hand when download is not an
-	 * option (for example on a server with no outbound internet access).
-	 */
-	private string function manualInstructions( required struct platform, required string binaryFile ){
-		return "To install it by hand, download " & arguments.platform.asset & " from the module's GitHub Releases, unzip it to '" &
-		getDirectoryFromPath( arguments.binaryFile ) & "', or set the 'binaryPath' module setting to an executable you provide.";
+	private string function missingMessage( required string baseDir, required string tag ){
+		if ( downloader.isPresent( arguments.baseDir ) ) {
+			return "The cached cbcloudscraper binary is for a different version (found '" &
+			downloader.installedTag( arguments.baseDir ) & "', need '" & arguments.tag & "').";
+		}
+		return "The cbcloudscraper binary for " & arguments.tag & " is not installed.";
+	}
+
+	private string function manualInstructions( required string baseDir ){
+		return "Run 'box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install' to fetch it, " &
+		"or download the release asset by hand into '" & getDirectoryFromPath(
+			downloader.binaryPathFor( arguments.baseDir )
+		) &
+		"', or set the 'binaryPath' module setting to an executable you provide.";
 	}
 
 }

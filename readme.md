@@ -68,8 +68,37 @@ box install homestar9/cbcloudscraper
 
 Either way you get pure CFML — no Python, no build step. The first `get`/`post` call
 downloads the Windows binary once (about 26 MB) from the matching GitHub Release and caches
-it under the module's `bin/` folder; every later call uses the cached copy. Update with
-`box update cbcloudscraper`.
+it under the module's `bin/` folder; every later call uses the cached copy.
+
+## Pre-installing and updating the binary
+
+The binary downloads automatically on the first request, so you can skip this section and it
+will just work. To fetch it ahead of time — for example during a deploy, so the first real
+request is not delayed — use the bundled CommandBox task from your app root:
+
+```bash
+box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=status    # installed vs wanted version
+box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install   # download it now
+box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=update    # refresh only if out of date
+```
+
+A shorter alias can go in your app's `box.json`:
+
+```json
+"scripts": {
+    "cbcloudscraper:install": "task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install"
+}
+```
+
+Or pre-fetch from application code (for example in `onApplicationStart` or a scheduled task):
+
+```cfc
+getInstance( "CloudScraper@cbcloudscraper" ).warmup();
+```
+
+**Updating.** `box update cbcloudscraper` bumps the module. The cached binary records which
+release it came from, so the next request automatically fetches the binary that matches the
+new module version — nothing to clear by hand.
 
 ## Usage
 
@@ -81,7 +110,7 @@ component {
     property name="scraper" inject="CloudScraper@cbcloudscraper";
 
     function getWebpage( required string licenseNumber ){
-        var result = scraper.get( "https://example-site.com/" );
+        var result = scraper.get( "https://example.com/" );
 
         if ( !result.ok ) {
             throw( message = "Lookup failed: " & result.errorDetail );
@@ -100,8 +129,8 @@ POST a form (a struct is sent as `application/x-www-form-urlencoded`):
 
 ```cfc
 var result = scraper.post(
-    url  = "https://example-state.gov/search",
-    body = { "lastName" : "Smith", "licenseType" : "General" }
+    url  = "https://example.com/search",
+    body = { "lastName" : "Smith" }
 );
 ```
 
@@ -187,7 +216,7 @@ Override any of these in your app's `config/ColdBox.cfc` under
 | `binaryPath` | `""` | Full path to an executable you provide. When set, the module uses it and never downloads. |
 | `autoDownloadBinary` | `true` | Download the binary from GitHub Releases when it is missing. Set `false` to require a pre-placed binary. |
 | `binaryDirectory` | `""` (the module's `bin/` folder) | Where the downloaded binary is cached. Override when the module folder is read-only. |
-| `binaryBaseURL` | GitHub Releases download URL | Where per-platform binary assets are fetched from. |
+| `binaryBaseURL` | `""` (derived from `repository.url`) | Where per-platform binary assets are fetched from. |
 | `binaryReleaseTag` | `""` (derives `v` + version) | Pin the release tag the binary is fetched from. |
 | `verifyChecksum` | `true` | Verify the download's SHA-256 before using it. |
 | `defaultTimeout` | `30` | Request timeout in seconds. |

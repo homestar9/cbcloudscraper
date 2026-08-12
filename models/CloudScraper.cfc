@@ -23,6 +23,11 @@ component singleton accessors="true" {
 	// the semaphore after WireBox injects the settings. An empty string means there is no limit.
 	variables.semaphore = "";
 
+	// Millisecond timer value used to schedule temporary-file cleanup. onDIComplete sets this value
+	// after startup cleanup. claimSweep updates it before recurring cleanup starts. Zero means no
+	// cleanup time has been recorded.
+	variables.lastSweepAt = 0;
+
 	function init(){
 		return this;
 	}
@@ -44,6 +49,7 @@ component singleton accessors="true" {
 			// Startup can continue because an old temporary file does not stop new requests.
 			logger.debug( "cbcloudscraper startup temp sweep failed: " & e.message );
 		}
+		variables.lastSweepAt = getTickCount();
 		return this;
 	}
 
@@ -193,11 +199,16 @@ component singleton accessors="true" {
 			if ( !( settings.keepFailureLogs ?: false ) ) {
 				safeDelete( logPath );
 			}
+			sweepIfDue();
 		}
 	}
 
 	/**
-	 * Delete old cookie files and leftover temporary request or response files.
+	 * Delete leftover temporary request, response, and log files.
+	 *
+	 * This method deletes every matching file older than olderThanMinutes. This can include a file
+	 * that another request is still using. Set olderThanMinutes higher than the longest time that
+	 * one request can remain active.
 	 *
 	 * @olderThanMinutes Files older than this many minutes are removed.
 	 *
@@ -370,6 +381,62 @@ component singleton accessors="true" {
 			"executionTime"       : getTickCount() - arguments.started,
 			"errorDetail"         : arguments.detail
 		};
+	}
+
+	/**
+	 * Clean temporary files when the configured time has passed.
+	 *
+	 * Startup cleanup cannot remove files left by requests that fail later. send() calls this
+	 * method after every request so a long-running server can remove those files. The method
+	 * returns without locking or reading the directory when cleanup is not due.
+	 */
+	private void function sweepIfDue(){
+		try {
+			var minutes = settings.tempSweepMinutes ?: 30;
+			// Zero or a negative value disables cleanup after requests.
+			if ( minutes <= 0 || !claimSweep( minutes ) ) {
+				return;
+			}
+			sweepTempFiles( minutes );
+		} catch ( any e ) {
+			// Cleanup errors must not change the completed request's result.
+			logger.debug( "cbcloudscraper could not run scheduled temp-file cleanup: " & e.message );
+		}
+	}
+
+	/**
+	 * Return true when this thread should run the next cleanup.
+	 *
+	 * The first check avoids taking the lock when cleanup is not due. The second check runs
+	 * inside the lock. It prevents two threads from claiming the same cleanup interval. The thread
+	 * that claims the interval records the time before cleanup starts.
+	 *
+	 * @minutes How many minutes must pass between cleanup runs.
+	 */
+	private boolean function claimSweep( required numeric minutes ){
+		if ( isSweepRecent( arguments.minutes ) ) {
+			return false;
+		}
+		var claimed = false;
+		lock name="cbcs-sweep-#hash( settings.workingDirectory, "MD5" )#" type="exclusive" timeout="5" {
+			if ( !isSweepRecent( arguments.minutes ) ) {
+				variables.lastSweepAt = getTickCount();
+				claimed               = true;
+			}
+		}
+		return claimed;
+	}
+
+	/**
+	 * Return true when the last cleanup claim was less than minutes ago.
+	 *
+	 * @minutes How many minutes must pass between cleanup runs.
+	 */
+	private boolean function isSweepRecent( required numeric minutes ){
+		if ( variables.lastSweepAt <= 0 ) {
+			return false;
+		}
+		return ( getTickCount() - variables.lastSweepAt ) < ( arguments.minutes * 60000 );
 	}
 
 	/**

@@ -9,8 +9,14 @@
  * ProcessBuilder sends all console output to a diagnostic log file. This prevents a large
  * amount of output from filling the operating system's pipe buffer and freezing the JVM thread.
  * The executable writes the HTTP result to a separate response file.
+ *
+ * The finally block in run() stops the child process when it is still running. A CFML engine can
+ * interrupt the request thread while waitFor() waits for the process. Without this cleanup, the
+ * process could continue running after the request ends.
  */
 component singleton {
+
+	property name="logger" inject="logbox:logger:{this}";
 
 	/**
 	 * Run the executable and wait for it to finish or time out.
@@ -54,25 +60,66 @@ component singleton {
 			}
 		}
 
-		var process  = builder.start();
-		var finished = process.waitFor( javacast( "long", arguments.timeoutSeconds ), jTimeUnit.SECONDS );
+		var process = builder.start();
 
-		if ( !finished ) {
-			// Force the process to stop, then wait briefly for the operating system to finish the shutdown.
-			process.destroyForcibly();
-			process.waitFor( javacast( "long", 5 ), jTimeUnit.SECONDS );
-			return {
-				"exitCode" : -1,
-				"timedOut" : true,
-				"logPath"  : arguments.logPath
-			};
+		// Start with the result values for a timeout. Replace them if the process finishes normally.
+		//
+		// The return statement must stay after the try/finally block. Lucee 5 fails to compile this
+		// method when the return is inside the try block and the finally block contains another
+		// try/catch. Lucee reports the compiler failure as a NullPointerException without a line
+		// number.
+		var exitCode = -1;
+		var timedOut = true;
+
+		try {
+			// getOutputStream() returns the Java stream connected to the child process's standard
+			// input. The executable does not read that input, so close the stream now. Otherwise, its
+			// operating system handle can remain open until the JVM removes the process object from
+			// memory. A busy server can leave many of these operating system resources open.
+			closeQuietly( process.getOutputStream() );
+
+			if ( process.waitFor( javacast( "long", arguments.timeoutSeconds ), jTimeUnit.SECONDS ) ) {
+				exitCode = process.exitValue();
+				timedOut = false;
+			} else {
+				// Force the process to stop. Then wait briefly for the operating system to finish.
+				process.destroyForcibly();
+				process.waitFor( javacast( "long", 5 ), jTimeUnit.SECONDS );
+			}
+		} finally {
+			// waitFor() throws InterruptedException when the CFML engine interrupts this request
+			// thread. This can happen when the server times out a request or an administrator cancels
+			// it. Stop the child before the caller releases its process slot. On a normal return, the
+			// child has already stopped and isAlive() returns false.
+			try {
+				if ( process.isAlive() ) {
+					process.destroyForcibly();
+				}
+			} catch ( any e ) {
+				// Log the cleanup error without changing the current result or error.
+				logger.debug( "cbcloudscraper could not stop the child process during cleanup: " & e.message );
+			}
 		}
 
 		return {
-			"exitCode" : process.exitValue(),
-			"timedOut" : false,
+			"exitCode" : exitCode,
+			"timedOut" : timedOut,
 			"logPath"  : arguments.logPath
 		};
+	}
+
+	/**
+	 * Close a Java stream without letting a close error stop the request.
+	 *
+	 * @closeable Any object with a close() method.
+	 */
+	private void function closeQuietly( required any closeable ){
+		try {
+			arguments.closeable.close();
+		} catch ( any e ) {
+			// The stream may already be closed because the child exited. Log the error and continue.
+			logger.debug( "cbcloudscraper could not close the child process input stream: " & e.message );
+		}
 	}
 
 }

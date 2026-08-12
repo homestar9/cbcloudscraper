@@ -7,6 +7,31 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a helper process leak. A helper could keep running when the CFML engine interrupted the
+  request thread. This can happen when the server times out a request or an administrator cancels
+  it. `ProcessRunner` now checks the helper process from a `finally` block and stops it when
+  needed. This prevents a helper from running after the request releases its process slot.
+- Closed the helper process's unused standard input stream as soon as the process starts. The
+  operating system previously kept the stream handle open until the JVM removed the process
+  object from memory. A busy server could leave many of these handles open.
+
+### Changed
+
+- Temporary-file cleanup can now run more than once. Cleanup previously ran only when the
+  `CloudScraper` model loaded during application startup. A server that stayed online could not
+  remove files left by later interrupted requests. After each request, the module now checks
+  whether `tempSweepMinutes` have passed since the last cleanup. Set `tempSweepMinutes` to `0` to
+  clean temporary files only at startup.
+
+### Documentation
+
+- Added a README section about running requests at the same time. The section explains process
+  limits, helper-process memory use, cookie-cache locks, and when to update the helper.
+- Added a README section about crawling sites that use JavaScript. The section explains what
+  `fileContent` contains and why links created by browser-side JavaScript are not included.
+
 ## [1.0.0] - 2026-08-11
 
 ### Added

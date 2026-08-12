@@ -112,6 +112,36 @@ var result = scraper.get(
 
 Choosing one engine turns off the automatic fallback for that request.
 
+## Crawling and JavaScript
+
+`fileContent` contains the response body decoded as text. The module does not build or display
+the page like a browser.
+
+The `cloudscraper` engine can run JavaScript from some Cloudflare challenges. It uses `js2py`, a
+JavaScript interpreter written in Python. The interpreter only solves the Cloudflare challenge.
+It does not provide a page layout engine, a document object model (DOM), or browser APIs. This
+means it cannot run the website's application code like a browser. The `curl_cffi` engine does
+not run JavaScript.
+
+The module returns the response text, but it does not extract links for you. The following table
+shows which links your code can find in `fileContent`:
+
+| What you want to find | Is it available in `fileContent`? |
+| --- | --- |
+| `<a href>` links written by the web server | Yes |
+| `<script src>` and other tag attributes | Yes |
+| URLs written inside inline `<script>` text | Yes. Your code can search the text with a regular expression. |
+| Links that a React, Vue, or Angular application creates while the page runs | No |
+| URLs that the page loads later through a background request | No |
+
+If your target site builds its content in the browser, open the site once in your browser's
+developer tools. Open the Network tab and find the request that returns the page data. The data
+is often JSON. Then use this module to request that URL directly. A direct data request is faster
+and is less likely to fail when the site's page layout changes.
+
+If you need the page after its JavaScript runs, use a tool that runs a real browser, such as
+Playwright, FlareSolverr, or nodriver.
+
 ## Request methods
 
 ### `get( url, options={} )`
@@ -315,6 +345,49 @@ The cookie manager provides these methods:
 - `clearCookies( domain )` deletes the cookie file for one domain.
 - `clearAllCookies()` deletes every stored cookie file.
 
+## Run requests at the same time
+
+You can call the module from several threads at the same time. Each call has its own request
+state. Each temporary file name also contains a unique identifier, so calls do not share
+temporary files.
+
+`maxConcurrentProcesses` sets how many helper processes may run at the same time. The default is
+`8`. Each allowed process is called a process slot. Before a thread starts a helper process, it
+waits for an open slot. If no slot opens within `acquireTimeout` seconds, the module raises a
+`cbcloudscraper.Busy` error. With the default error settings, the request returns `ok=false`.
+
+```cfc
+// config/ColdBox.cfc
+moduleSettings = {
+    cbcloudscraper : {
+        maxConcurrentProcesses : 16, // More parallel requests.
+        acquireTimeout         : 60  // Wait longer for a slot instead of failing.
+    }
+};
+```
+
+Keep these three limits in mind.
+
+**Available memory limits the number of helper processes.** Each active request starts a separate
+helper process with its own copy of the Python runtime. Plan for about 60 MB of memory for each
+process. Set `maxConcurrentProcesses` low enough for the amount of memory that your server can
+give to these processes.
+
+**The cookie cache runs requests to the same domain one at a time.** When `cookieCache.enabled`
+is `true`, requests to the same domain share one cookie file. The module locks that domain until
+each request finishes. Requests to different domains can still run at the same time. A thread
+gets a process slot before it waits for the domain lock. Waiting threads can therefore fill every
+process slot and prevent requests to other domains from starting. Leave the cookie cache disabled
+when you crawl one site in parallel. You can also set `useCookieCache=false` on those requests.
+
+**Do not update the helper program while requests are running.** An update removes and recreates
+the entire platform folder under `bin/`. A request can fail if the update changes these files
+while the helper program starts or runs. The lock for an automatic first-request download does
+not protect a manual update from the CommandBox task. Run
+`box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=update` during a
+maintenance window. You can also call `warmup()` during application startup so the download
+finishes before the application accepts requests.
+
 ## Configuration
 
 Add overrides under `moduleSettings.cbcloudscraper` in your application's
@@ -338,7 +411,7 @@ Add overrides under `moduleSettings.cbcloudscraper` in your application's
 | `proxy` | `""` | Sets a default proxy URL. An empty string means no proxy. |
 | `workingDirectory` | System temp directory plus `/cbcloudscraper` | Stores temporary request, response, log, and default cookie files. |
 | `keepFailureLogs` | `false` | Keeps process log files instead of deleting them after each request. |
-| `tempSweepMinutes` | `30` | Deletes leftover temporary files older than this many minutes when the model starts or a sweep runs. |
+| `tempSweepMinutes` | `30` | Deletes temporary files older than this many minutes. The module cleans these files at startup. After each request, it checks whether this many minutes have passed since the last cleanup. Use `0` to disable cleanup after requests. |
 | `cookieCache` | `{ enabled:false, directory:"" }` | Enables stored cookies and optionally changes their directory. An empty directory uses `workingDirectory/cookies`. |
 | `maxConcurrentProcesses` | `8` | Limits how many helper processes can run at the same time. Use `0` for no limit. |
 | `acquireTimeout` | `20` | Sets how many seconds a request waits for an open process slot. |

@@ -13,19 +13,34 @@
 
     Consumers download that binary from the Release on first use (see models/BinaryProvisioner.cfc).
 
-    Run this AFTER you have bumped the version and committed:
+    There are two ways to run this, and which one you need depends on who created the git tag.
+
+    1. Plain release from master, where the build kit creates the tag itself:
+
         box run-script bump:patch      # or bump:minor / bump:major
         git commit -am "Release vX.Y.Z"
         powershell -ExecutionPolicy Bypass -File build\release.ps1
+
+    2. Gitflow release, where GitKraken's "Finish release" already created the tag. Push master,
+       develop, and the tag first, then check out master and run:
+
+        powershell -ExecutionPolicy Bypass -File build\release.ps1 -ExistingTag
+
+    Without -ExistingTag the kit tries to create the tag and stops, because it already exists.
 
     Prerequisites: a clean git working tree on master, signed in to ForgeBox (box login), and
     the GitHub CLI (gh) authenticated.
 
 .PARAMETER SkipBinaryBuild
     Reuse the existing bin\win64 binary instead of rebuilding it.
+
+.PARAMETER ExistingTag
+    Publish a tag that already exists and points at the checked-out commit, instead of creating
+    one. Use this whenever GitKraken or the git-flow extension made the tag.
 #>
 param(
-    [switch]$SkipBinaryBuild
+    [switch]$SkipBinaryBuild,
+    [switch]$ExistingTag
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,9 +80,16 @@ try {
     box server start serverConfigFile=server-lucee@5.json --noSaveSettings | Out-Null
 
     # ── 4. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
-    Write-Host "Running the release kit for $Tag..." -ForegroundColor Cyan
-    box run-script release
-    if ($LASTEXITCODE -ne 0) { throw "The release kit (box run-script release) failed." }
+    # release:existing-tag skips tag creation and the branch push, because the tag is already
+    # made and pushed. Everything else about the two paths is the same.
+    $ReleaseScript = if ($ExistingTag) { "release:existing-tag" } else { "release" }
+    if ($ExistingTag) {
+        Write-Host "Running the release kit for existing tag $Tag..." -ForegroundColor Cyan
+    } else {
+        Write-Host "Running the release kit for $Tag (the kit will create the tag)..." -ForegroundColor Cyan
+    }
+    box run-script $ReleaseScript
+    if ($LASTEXITCODE -ne 0) { throw "The release kit (box run-script $ReleaseScript) failed." }
 
     # ── 5. Attach the binary to the Release the kit just created ──────────────
     Write-Host "Attaching the binary to Release $Tag..." -ForegroundColor Cyan

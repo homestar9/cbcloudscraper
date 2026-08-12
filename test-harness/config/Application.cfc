@@ -1,6 +1,5 @@
 ﻿/**		
-* This is a protection Application cfm for the config file. You do not
-* need to modify this file
+ * Stops direct requests to files in the config directory.
 */
 component{
 	abort;

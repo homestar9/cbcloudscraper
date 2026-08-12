@@ -1,20 +1,17 @@
 /**
- * Manages the on-disk cookie files that let Cloudflare clearance cookies persist
- * between separate runs of the executable.
+ * Manages cookie files that are shared across separate runs of the executable.
  *
- * Each HTTP request runs the executable as its own process, so there is no shared
- * memory to hold a session. A Cloudflare clearance cookie (cf_clearance) earned on one
- * request is valuable on the next request to the same site. This component decides where
- * each site's cookie file lives and offers helpers to inspect or clear it. The executable
- * reads and writes the file itself; this component only manages paths and housekeeping.
+ * Each HTTP request starts a new process, so requests cannot share cookies in memory.
+ * A cf_clearance cookie from one request may help the next request reach the same site.
+ * This component creates a separate cookie-file path for each site. It can also read or delete
+ * those files. The executable handles changes to the cookie data during a request.
  */
 component singleton {
 
 	property name="settings" inject="coldbox:moduleSettings:cbcloudscraper";
 
 	/**
-	 * Return the cookie file path for a domain, or an empty string when the cookie
-	 * cache is turned off. An empty string tells the caller not to use a cookie file.
+	 * Return the cookie-file path for a domain. Return an empty string when cookie caching is off.
 	 *
 	 * @domain The target host name, for example "www.example.com".
 	 */
@@ -71,7 +68,7 @@ component singleton {
 		}
 	}
 
-	/************************* PRIVATE HELPERS *************************/
+	// Private helpers
 
 	private boolean function isCacheEnabled(){
 		return structKeyExists( settings, "cookieCache" ) && ( settings.cookieCache.enabled ?: false );
@@ -93,9 +90,8 @@ component singleton {
 	}
 
 	/**
-	 * Turn a host name into a safe, short, unique file name. Keeps a readable prefix of
-	 * the host and appends a hash so that unusual characters or very long names cannot
-	 * produce an illegal or colliding file name.
+	 * Build a safe cookie filename from a host name. Keep the first 40 valid characters so the
+	 * file remains recognizable. Add a hash so different host names cannot use the same file.
 	 */
 	private string function sanitize( required string domain ){
 		var host = lCase(

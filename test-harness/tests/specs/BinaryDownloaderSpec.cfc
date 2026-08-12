@@ -1,9 +1,9 @@
 /**
- * Tests for BinaryDownloader's pure helpers.
+ * Tests BinaryDownloader methods that do not use outside services.
  *
- * Hermetic and OS-agnostic: no network, and assertions are built from the platform this test
- * happens to run on, so they hold on Windows (dev) and Linux (CI) alike. The actual download
- * is exercised by hand against a published GitHub Release, not here.
+ * These tests do not use the network. They build expected paths from the current operating
+ * system, so the same tests work on Windows development machines and Linux CI runners. Test the
+ * real download manually with a published GitHub Release.
  */
 component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
@@ -54,19 +54,19 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				var dir     = getTempDirectory() & "cbcs-dl-" & createUUID();
 				var platDir = dir & "/" & platform.dir;
 				try {
-					// Nothing there yet.
+					// A new directory has no executable or version tag.
 					expect( downloader.isPresent( dir ) ).toBeFalse();
 					expect( downloader.installedTag( dir ) ).toBe( "" );
 					expect( downloader.isCurrent( dir, "v1.0.0" ) ).toBeFalse();
 
-					// Unstamped binary present: usable, counts as current for any tag.
+					// An executable without a version tag is treated as a local build and can be used.
 					directoryCreate( platDir, true, true );
 					fileWrite( platDir & "/" & platform.exe, "not a real binary" );
 					expect( downloader.isPresent( dir ) ).toBeTrue();
 					expect( downloader.installedTag( dir ) ).toBe( "" );
 					expect( downloader.isCurrent( dir, "v1.0.0" ) ).toBeTrue();
 
-					// Stamped binary: current only for the matching tag.
+					// A tagged executable is current only when its tag matches the requested tag.
 					fileWrite( platDir & "/.cbcloudscraper-version", "v1.0.0" );
 					expect( downloader.installedTag( dir ) ).toBe( "v1.0.0" );
 					expect( downloader.isCurrent( dir, "v1.0.0" ) ).toBeTrue();

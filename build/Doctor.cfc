@@ -1,15 +1,14 @@
 /**
- * Reports whether the project is ready for a release.
+ * Checks whether the project is ready for a release.
  *
- * Run `box run-script release:check` from the project root. The task checks the settings,
- * repository, changelog, required tools, and test server. It reports every problem it can find
- * instead of stopping after the first problem.
+ * Run `box run-script release:check` from the project root. The task checks project settings,
+ * Git, the changelog, required tools, and the test server. It reports every problem it finds.
  *
  * This task does not change files, Git state, servers, or remote services.
  */
 component {
 
-	/** Loads settings while keeping configuration errors for the final report. */
+	/** Load settings and save configuration errors for the final report. */
 	function init(){
 		variables.configError = "";
 		try {
@@ -22,7 +21,7 @@ component {
 	}
 
 	/**
-	 * Runs every check and prints a summary.
+	 * Run every readiness check and print a summary.
 	 */
 	function run(){
 		print.line().boldLine( "Release readiness" ).line( repeatString( "-", 60 ) ).toConsole();
@@ -54,11 +53,11 @@ component {
 		}
 	}
 
-	// READINESS CHECKS
+	// Readiness checks
 
 	/**
-	 * Reports the settings a release will use, so surprises show up here rather than mid
-	 * release.
+	 * Print the settings that the release will use. This lets the developer catch a wrong setting
+	 * before the release starts.
 	 */
 	private function checkConfig(){
 		print.line().boldLine( "Settings" ).toConsole();
@@ -74,7 +73,7 @@ component {
 	}
 
 	/**
-	 * Checks Git first. The remaining Git checks only run when the folder is a repository.
+	 * Check whether this directory is a Git repository before running the other Git checks.
 	 */
 	private function checkGit(){
 		print.line().boldLine( "Git" ).toConsole();
@@ -158,7 +157,7 @@ component {
 	}
 
 	/**
-	 * Checks the changelog exists and holds what a release needs.
+	 * Check that the changelog exists and contains the required release sections.
 	 */
 	private function checkChangelog(){
 		print.line().boldLine( "Changelog" ).toConsole();
@@ -177,7 +176,7 @@ component {
 		var body    = fileRead( path );
 		var version = variables.config.version();
 
-		// A doubled ## in a CFML string means one literal #, so #### matches a "## " heading.
+		// CFML uses ## for one literal # inside a string. The #### text therefore matches a "## " heading.
 		if ( !reFindNoCase( "####\s*\[Unreleased\]", body ) ) {
 			report(
 				false,
@@ -204,7 +203,7 @@ component {
 	}
 
 	/**
-	 * Checks only the publishing tools enabled in build.json.
+	 * Check only the publishing tools enabled in build.json.
 	 */
 	private function checkTools(){
 		print.line().boldLine( "Tools" ).toConsole();
@@ -253,7 +252,7 @@ component {
 	}
 
 	/**
-	 * Checks the test server is answering, since the build runs the suite against it.
+	 * Check that the test server responds before the build tries to run the suite.
 	 */
 	private function checkServer(){
 		print.line().boldLine( "Test server" ).toConsole();
@@ -291,10 +290,10 @@ component {
 		}
 	}
 
-	// REPORT OUTPUT
+	// Report output
 
 	/**
-	 * Prints one result and counts the failures.
+	 * Print one check result and add failed checks to the total.
 	 *
 	 * @passed  Whether the check passed.
 	 * @label   What was checked.
@@ -314,7 +313,7 @@ component {
 	}
 
 	/**
-	 * Turns true and false into yes and no for reading.
+	 * Convert true and false to the words "yes" and "no".
 	 *
 	 * @value The value to show.
 	 */

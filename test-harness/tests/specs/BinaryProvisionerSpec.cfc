@@ -1,10 +1,9 @@
 /**
- * Tests for BinaryProvisioner.
+ * Tests BinaryProvisioner without downloading files.
  *
- * These are hermetic: they never reach the network. They cover the resolution paths that do
- * not require a download — an explicit binary, a missing explicit binary, the "auto-download
- * off" error, and the version-stamp decision (a matching stamp is current, a stale one is not).
- * The real download path is verified by hand against a published GitHub Release.
+ * These tests cover paths that do not need the network. They check a custom executable path, a
+ * missing custom executable, disabled automatic downloads, and matching or outdated version tags.
+ * Test the real download manually with a published GitHub Release.
  */
 component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
@@ -17,11 +16,11 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 	}
 
 	function run(){
-		// The binary the local build produces, if present. Used for the short-circuit test.
+		// Path to the executable created by a local Windows build
 		var localBinary    = expandPath( "/cbcloudscraper/bin/win64/cbcloudscraper.exe" );
 		var hasLocalBinary = fileExists( localBinary );
 
-		// Create a fake win64 binary (and optional version stamp) under a base directory.
+		// Create a fake Windows executable and optional version tag in a test directory.
 		var stageBinary = function( required string baseDir, string tag = "" ){
 			var platformDir = arguments.baseDir & "/win64";
 			directoryCreate( platformDir, true, true );
@@ -39,7 +38,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			beforeEach( function(){
 				provisioner = getInstance( "BinaryProvisioner@cbcloudscraper" );
 				settings    = getInstance( dsl = "coldbox:moduleSettings:cbcloudscraper" );
-				// Save the settings this suite changes, so each test starts clean.
+				// Save shared settings so afterEach() can restore them after every test.
 				saved       = {
 					"binaryPath"         : settings.binaryPath,
 					"binaryDirectory"    : settings.binaryDirectory,
@@ -95,7 +94,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					settings.binaryPath         = "";
 					settings.binaryDirectory    = dir;
 					settings.binaryReleaseTag   = "v1.0.0";
-					settings.autoDownloadBinary = false; // proves it did not download
+					settings.autoDownloadBinary = false; // This test must use the existing executable.
 					var resolved                = replace( provisioner.ensureBinary(), "\", "/", "all" );
 					expect( resolved ).toBe(
 						replace(
@@ -112,12 +111,12 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
 			it( "treats a binary with a stale version stamp as not current", function(){
 				var dir = getTempDirectory() & "cbcs-stale-" & createUUID();
-				stageBinary( dir, "v0.0.1" ); // older than the wanted tag
+				stageBinary( dir, "v0.0.1" ); // This tag is older than the requested version.
 				try {
 					settings.binaryPath         = "";
 					settings.binaryDirectory    = dir;
 					settings.binaryReleaseTag   = "v1.0.0";
-					settings.autoDownloadBinary = false; // so a stale binary surfaces as an error
+					settings.autoDownloadBinary = false; // Report the outdated cache instead of replacing it.
 					expect( function(){
 						provisioner.ensureBinary();
 					} ).toThrow( type = "cbcloudscraper.BinaryUnavailable" );
@@ -148,9 +147,9 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				skip  = !hasLocalBinary,
 				body  = function(){
 					settings.binaryPath      = "";
-					settings.binaryDirectory = ""; // default: the module's own bin/ folder
-					// Compare with slashes normalized: both point to the same file, but the
-					// provisioner joins path parts with "/" while expandPath uses "\".
+					settings.binaryDirectory = ""; // Use the module's bin directory.
+					// Normalize separators before comparing the paths. The provisioner joins paths with
+					// forward slashes, while expandPath uses Windows backslashes.
 					var resolved             = replace( provisioner.ensureBinary(), "\", "/", "all" );
 					expect( resolved ).toBe( replace( localBinary, "\", "/", "all" ) );
 				}

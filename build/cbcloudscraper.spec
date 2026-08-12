@@ -24,10 +24,13 @@ hiddenimports = [
     "cookiejar",
 ]
 
-# cloudscraper ships a data file (browsers.json) that is not found by static analysis;
-# curl_cffi ships a compiled libcurl and its own CA bundle. collect_all gathers the
-# code, the binaries, and the data files for each.
-for package in ("cloudscraper", "curl_cffi"):
+# cloudscraper25 ships a data file (browsers.json) that is not found by static analysis,
+# and runs its JavaScript challenge through js2py, which (with its pyjsparser dependency)
+# ships data files PyInstaller's static analysis misses. curl_cffi ships a compiled libcurl
+# and its own CA bundle. collect_all gathers the code, the binaries, and the data files for
+# each. (pycryptodome, imported as "Crypto", has a built-in PyInstaller hook, so it is not
+# listed here; add "Crypto" if a frozen run reports it missing.)
+for package in ("cloudscraper25", "js2py", "pyjsparser", "curl_cffi"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_binaries

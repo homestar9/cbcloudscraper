@@ -43,6 +43,7 @@
 		"bump:beta"            : "task run taskFile=build/Bump.cfc :level=preminor :preid=beta",
 		"bump:alpha"           : "task run taskFile=build/Bump.cfc :level=preminor :preid=alpha",
 		"build:package"        : "task run taskFile=build/Build.cfc :projectName=`package show slug` :version=`package show version`",
+		"binary:check"         : "!%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -File build/check-updates.ps1",
 		"format"               : "cfformat run models,tasks,ModuleConfig.cfc,test-harness/tests/ --overwrite",
 		"format:watch"         : "cfformat watch models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
 		"format:check"         : "cfformat check models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",

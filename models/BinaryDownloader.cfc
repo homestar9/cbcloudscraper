@@ -1,14 +1,13 @@
 /**
- * Reusable download logic for the cbcloudscraper executable.
+ * Downloads and stores the cbcloudscraper executable.
  *
- * This component holds no ColdBox or WireBox state and reads no module settings, so the same
- * code runs in two places: inside a running ColdBox app (used by BinaryProvisioner) and inside
- * a CommandBox task (tasks/Binary.cfc). Every input is passed in as an argument.
+ * This component does not use ColdBox state, WireBox state, or module settings. BinaryProvisioner
+ * uses BinaryDownloader inside the application. tasks/Binary.cfc uses BinaryDownloader from
+ * CommandBox. Each caller passes all required values as arguments.
  *
- * The binary for a given module version lives at:  <basedir>/<platform>/cbcloudscraper[.exe]
- * A marker file  <basedir>/<platform>/.cbcloudscraper-version  records the release tag that was
- * downloaded, so a later run can tell whether the cached binary matches the wanted version and
- * refresh it when the module has been updated.
+ * The executable is stored at baseDir/platform/cbcloudscraper[.exe]. A file named
+ * .cbcloudscraper-version is stored in the same directory. The version file records the downloaded
+ * release tag. Later requests use the tag to decide whether the cached executable is current.
  */
 component singleton accessors="true" {
 
@@ -16,7 +15,7 @@ component singleton accessors="true" {
 	variables.defaultBaseURL = "https://github.com/homestar9/cbcloudscraper/releases/download";
 
 	/**
-	 * Decide the platform folder, executable name, and release asset name for this OS.
+	 * Return the directory, executable, and release asset names for the current operating system.
 	 */
 	struct function getPlatform(){
 		var osName = server.os.name;
@@ -42,7 +41,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * The absolute path where the executable for this platform belongs under baseDir.
+	 * Return the executable's full path inside baseDir.
 	 *
 	 * @baseDir The directory that holds the per-platform subfolders.
 	 */
@@ -52,7 +51,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * True when the executable for this platform exists under baseDir.
+	 * Return true when the executable exists inside baseDir.
 	 *
 	 * @baseDir The directory that holds the per-platform subfolders.
 	 */
@@ -61,7 +60,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * The release tag recorded for the cached binary, or an empty string when there is none.
+	 * Return the cached executable's release tag. Return an empty string when no tag is stored.
 	 *
 	 * @baseDir The directory that holds the per-platform subfolders.
 	 */
@@ -78,15 +77,14 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * True when the cached binary can be used for the wanted tag.
+	 * Return true when the cached executable can be used for the requested tag.
 	 *
-	 * A binary counts as current when it exists AND either it carries no version stamp (a local
-	 * build made with build-binary.ps1) or its stamp matches the wanted tag. Only a stamp that
-	 * names a *different* tag is treated as stale, which is what triggers a refresh after the
-	 * module has been updated to a new version.
+	 * An executable is current when the file exists and its stored tag matches the requested tag.
+	 * An executable without a stored tag is also current because it may be a local build from
+	 * build-binary.ps1. A different stored tag means the cached executable must be replaced.
 	 *
 	 * @baseDir The directory that holds the per-platform subfolders.
-	 * @tag     The wanted release tag, for example "v1.0.0".
+	 * @tag     The requested release tag, for example "v1.0.0".
 	 */
 	boolean function isCurrent( required string baseDir, required string tag ){
 		if ( !isPresent( arguments.baseDir ) ) {
@@ -97,16 +95,16 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Make sure the cached binary matches the wanted tag, downloading it when needed.
+	 * Return a current executable. Download the requested release when the cache cannot be used.
 	 *
 	 * @baseDir        The directory that holds the per-platform subfolders.
-	 * @tag            The wanted release tag, for example "v1.0.0".
-	 * @baseURL        The GitHub Releases download base, for example ".../releases/download".
+	 * @tag            The requested release tag, for example "v1.0.0".
+	 * @baseURL        The GitHub Releases base URL, such as ".../releases/download".
 	 * @verifyChecksum Verify the download's SHA-256 before using it.
 	 * @force          Download even when the cache already matches.
 	 * @log            Optional callback function( message ) for progress output.
 	 *
-	 * @return struct { action:"cached"|"installed"|"reinstalled", path, tag, present:true }
+	 * @return A struct with action, path, tag, and present values.
 	 */
 	struct function ensure(
 		required string baseDir,
@@ -153,9 +151,9 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * The module version read from a box.json at moduleRoot, or "0.0.0" when it cannot be read.
+	 * Read the module version from box.json. Return "0.0.0" when the file or version cannot be read.
 	 *
-	 * @moduleRoot The module's root folder (the one holding box.json).
+	 * @moduleRoot The module directory that contains box.json.
 	 */
 	string function readModuleVersion( required string moduleRoot ){
 		try {
@@ -169,10 +167,10 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * The release tag to fetch: the override when given, otherwise "v" + the module version.
+	 * Return the release tag override. If no override is set, return "v" plus the module version.
 	 *
 	 * @moduleRoot The module's root folder.
-	 * @override   A tag to force, or empty to derive from the version.
+	 * @override   A specific tag. Leave empty to build the tag from the module version.
 	 */
 	string function resolveTag( required string moduleRoot, string override = "" ){
 		if ( len( trim( arguments.override ) ) ) {
@@ -182,11 +180,11 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * The GitHub Releases download base URL. Uses the override when given, otherwise derives it
-	 * from box.json's repository url so the app and the CLI task share one source of truth.
+	 * Return the GitHub Releases base URL. Use the override when it is set. Otherwise, build the
+	 * URL from repository.url in box.json so the application and CommandBox task use the same URL.
 	 *
 	 * @moduleRoot The module's root folder.
-	 * @override   A base URL to force, or empty to derive from box.json.
+	 * @override   A specific base URL. Leave empty to build it from box.json.
 	 */
 	string function deriveBaseURL( required string moduleRoot, string override = "" ){
 		if ( len( trim( arguments.override ) ) ) {
@@ -206,18 +204,17 @@ component singleton accessors="true" {
 		if ( !len( repoURL ) ) {
 			return variables.defaultBaseURL;
 		}
-		// Normalize "https://github.com/owner/repo(.git)(/)" -> ".../releases/download".
+		// Remove an optional .git suffix and trailing slash before adding /releases/download.
 		repoURL = reReplace( repoURL, "\.git$", "" );
 		repoURL = reReplace( repoURL, "/$", "" );
 		return repoURL & "/releases/download";
 	}
 
-	/************************* PRIVATE HELPERS *************************/
+	// Private helpers
 
 	/**
-	 * Download the platform's asset to a staging file, verify it, then replace the platform
-	 * folder with its contents. The existing cache is only cleared after a good download, so a
-	 * failed download leaves the previous binary in place.
+	 * Download and verify the release archive in a temporary directory. Replace the platform
+	 * directory only after the download succeeds. A failed download leaves the cached files alone.
 	 */
 	private void function download(
 		required struct platform,
@@ -271,7 +268,7 @@ component singleton accessors="true" {
 			verifyChecksum( zipURL, zipPath );
 		}
 
-		// Replace the platform folder so no stale files from an older build linger.
+		// Replace the whole platform directory so files from older builds are removed.
 		if ( directoryExists( arguments.targetDir ) ) {
 			directoryDelete( arguments.targetDir, true );
 		}
@@ -303,13 +300,13 @@ component singleton accessors="true" {
 		try {
 			fileDelete( zipPath );
 		} catch ( any e ) {
-			// Best effort: a leftover staged zip in the temp folder is harmless.
+			// A later temporary-file cleanup can remove this archive.
 		}
 	}
 
 	/**
-	 * Download the ".sha256" companion file and compare it with the archive's hash. A published
-	 * checksum that does not match always fails; a missing checksum file is skipped.
+	 * Compare the archive with its published .sha256 checksum. Skip this check when the checksum
+	 * file is missing. Reject the archive when a published checksum does not match.
 	 */
 	private void function verifyChecksum( required string zipURL, required string zipPath ){
 		var sumURL   = arguments.zipURL & ".sha256";
@@ -322,7 +319,7 @@ component singleton accessors="true" {
 				result  = "local.sumResult"
 			);
 			if ( ( local.sumResult.status_code ?: 0 ) == 200 ) {
-				// The file may be "<hash>" or "<hash>  <filename>"; take the first token.
+				// Support checksum files that contain only the hash or the hash followed by a filename.
 				expected = lCase(
 					trim(
 						listFirst( trim( local.sumResult.fileContent ), " " & chr( 9 ) & chr( 10 ) & chr( 13 ) )

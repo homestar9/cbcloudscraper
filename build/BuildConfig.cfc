@@ -1,9 +1,9 @@
 /**
- * Loads and validates the settings shared by every build task.
+ * Loads and checks the settings shared by all build tasks.
  *
- * Each task passes the path of its build folder to init(). This component finds the project
- * root, reads build/build.json, applies defaults, and validates the final settings. It also
- * provides the shared path and process helpers used for Git and GitHub CLI commands.
+ * Each task passes its build directory to init(). BuildConfig then finds the project root, reads
+ * build/build.json, adds default values, and checks the final settings. BuildConfig also provides
+ * shared path helpers and runs Git or GitHub CLI commands.
  *
  * Projects configure this component through build/build.json. A project should not need to
  * edit this file.
@@ -11,7 +11,7 @@
 component {
 
 	/**
-	 * Finds the project root and loads the complete settings struct.
+	 * Find the project root and load the complete settings struct.
 	 *
 	 * @buildDir The build folder that contains this component.
 	 */
@@ -26,14 +26,14 @@ component {
 	}
 
 	/**
-	 * Returns the whole settings struct.
+	 * Return the complete settings struct.
 	 */
 	struct function getSettings(){
 		return variables.settings;
 	}
 
 	/**
-	 * Returns one setting.
+	 * Return one setting.
 	 *
 	 * @key          The setting name, for example "branch".
 	 * @defaultValue What to return when the setting is missing.
@@ -43,11 +43,11 @@ component {
 	}
 
 	/**
-	 * Turns a path relative to the project root into a full path.
+	 * Convert a path relative to the project root into a full path.
 	 *
-	 * Do not rename this to resolvePath. CommandBox tasks already have a resolvePath() that
-	 * wins over one declared here, and it measures from the task file's folder instead of the
-	 * project root, so paths come back wrong with no error to tell you.
+	 * Do not rename this method to resolvePath. CommandBox provides its own resolvePath() to tasks.
+	 * That method takes priority and starts from the task file's directory, not the project root.
+	 * The wrong method would return an incorrect path without reporting an error.
 	 *
 	 * @relative A path relative to the project root, for example "CHANGELOG.md".
 	 */
@@ -56,7 +56,7 @@ component {
 	}
 
 	/**
-	 * Turns a path relative to the build folder into a full path.
+	 * Convert a path relative to the build directory into a full path.
 	 *
 	 * @relative A path relative to the build folder, for example "templates/RELEASE.md".
 	 */
@@ -65,14 +65,14 @@ component {
 	}
 
 	/**
-	 * Returns the full path of the project root.
+	 * Return the full path to the project root.
 	 */
 	string function getRoot(){
 		return variables.root;
 	}
 
 	/**
-	 * Reads and returns the project's box.json.
+	 * Read and return the project's box.json data.
 	 */
 	struct function boxJSON(){
 		var path = repoPath( "box.json" );
@@ -83,7 +83,7 @@ component {
 	}
 
 	/**
-	 * Returns the package slug from box.json, falling back to the package name.
+	 * Return the package slug from box.json. Use the package name when the slug is missing.
 	 */
 	string function slug(){
 		var box = boxJSON();
@@ -91,26 +91,23 @@ component {
 	}
 
 	/**
-	 * Returns the version from box.json.
+	 * Return the version from box.json.
 	 */
 	string function version(){
 		return boxJSON().version ?: "0.0.0";
 	}
 
 	/**
-	 * Runs an outside program such as git or gh and returns its exit code and text output. It
-	 * never throws, so the caller decides what a failure means. That matters for checks such
-	 * as `git rev-parse --verify`, where a non-zero exit is the answer we want.
+	 * Run a program such as git or gh. Return its exit code and text output without throwing an
+	 * exception. The caller decides what a failure means. Some checks expect a nonzero exit code,
+	 * such as `git rev-parse --verify` when a reference does not exist.
 	 *
-	 * Arguments are passed as a list rather than one long string. The program gets each one
-	 * exactly as written, so a file path containing spaces needs no quoting and cannot be
-	 * split in the wrong place.
+	 * Pass each argument as a separate list item. Paths with spaces do not need quotes and cannot
+	 * be split into separate arguments.
 	 *
-	 * This runs the program directly through Java instead of through CommandBox. Task files
-	 * are handed helpers such as command() and shell by CommandBox, but a plain component like
-	 * this one is not, so it does its own process handling. Running directly also means no
-	 * shell features: no pipes, no redirection, no wildcards. Every call here is one program
-	 * with plain arguments, which is all a release needs.
+	 * Run the program through Java because CommandBox does not give command() or shell helpers to
+	 * plain components. The program runs without a shell, so pipes, output redirection, and wildcard
+	 * expansion are not available. Release commands only need one program with plain arguments.
 	 *
 	 * @name The program name, for example "git".
 	 * @args The arguments, for example [ "status", "--porcelain" ].
@@ -126,8 +123,7 @@ component {
 		try {
 			var builder = createObject( "java", "java.lang.ProcessBuilder" ).init( argList );
 			builder.directory( createObject( "java", "java.io.File" ).init( variables.root ) );
-			// Fold error output into normal output. Callers show one block of text, and a
-			// program's complaint is usually the most useful part of it.
+			// Combine standard error with standard output so callers receive one useful text block.
 			builder.redirectErrorStream( javaCast( "boolean", true ) );
 
 			var process = builder.start();
@@ -145,8 +141,8 @@ component {
 
 			return { exitCode : process.waitFor(), output : trim( output.toString() ) };
 		} catch ( any exception ) {
-			// Reaching here almost always means the program is not installed. 127 is the
-			// shell's own "command not found" code, so callers can spot that case.
+			// Most exceptions here mean the program is missing. Return 127 because callers already
+			// recognize that value as the standard "command not found" exit code.
 			return {
 				exitCode : 127,
 				output   : "Could not run '#arguments.name#': #exception.message#"
@@ -155,27 +151,25 @@ component {
 	}
 
 	/**
-	 * Reports whether a program can be found and run at all.
+	 * Return true when the program can be found and started.
 	 *
 	 * @name The program name, for example "gh".
 	 */
 	boolean function commandExists( required string name ){
-		// A found program has a full path; a missing one falls back to the bare name.
+		// resolveExecutable returns the original name when it cannot find a full path.
 		return findBinary( arguments.name ) != arguments.name;
 	}
 
 	/**
-	 * Finds a program and returns its full path, for example
-	 * C:\Program Files\Git\cmd\git.exe. Returns the bare name when nothing is found, which
-	 * lets the system try its own lookup and produces a readable error if the tool is missing.
+	 * Find a program and return its full path, such as C:\Program Files\Git\cmd\git.exe. Return
+	 * the original name when no file is found. Java can then try the operating system's normal
+	 * lookup and return a readable error when the program is missing.
 	 *
-	 * The path comes back without quotes. execNative() passes arguments to the program one at
-	 * a time, so spaces in a path are already safe, and quotes would become part of the name.
+	 * Return the path without quotes. execNative() passes the path as one argument, so spaces are
+	 * safe. Adding quotes would make the quote characters part of the filename.
 	 *
-	 * It searches PATH first, then a list of usual install folders. That second pass matters:
-	 * a terminal opened before you installed a tool keeps its old PATH until you open a new
-	 * one, so a program that works in a fresh window can look missing here. Searching the
-	 * usual folders means a stale PATH cannot stop a release.
+	 * Search PATH first, then common installation directories. A terminal keeps its old PATH when
+	 * a tool is installed after the terminal opens. The second search can still find that tool.
 	 *
 	 * Results are remembered for the life of the task.
 	 *
@@ -189,7 +183,7 @@ component {
 		var jFile     = createObject( "java", "java.io.File" );
 		var separator = jFile.separator;
 		var resolved  = arguments.name;
-		// The empty extension covers Mac and Linux; the rest are the Windows launchers.
+		// macOS and Linux use no extension. Windows may use any of the other listed extensions.
 		var extensions = [ "", ".exe", ".cmd", ".bat" ];
 
 		var searchDirs = [];
@@ -219,10 +213,10 @@ component {
 		return resolved;
 	}
 
-	// PROCESS PATHS
+	// Program paths
 
 	/**
-	 * The usual install folders to check when PATH does not turn up a program.
+	 * Return common installation directories to search when PATH does not contain a program.
 	 */
 	private array function wellKnownDirs(){
 		var system      = createObject( "java", "java.lang.System" );
@@ -258,11 +252,11 @@ component {
 		return directories;
 	}
 
-	// SETTINGS
+	// Settings
 
 	/**
-	 * Builds the settings struct: start with the defaults, lay build.json over the top, then
-	 * check the result makes sense.
+	 * Build the settings struct. Start with defaults, replace them with values from build.json,
+	 * then check that the final values are valid.
 	 */
 	private struct function loadSettings(){
 		var result   = defaults();
@@ -296,7 +290,7 @@ component {
 	}
 
 	/**
-	 * The settings used when build.json does not say otherwise.
+	 * Return the settings used when build.json does not provide a value.
 	 */
 	private struct function defaults(){
 		return {
@@ -304,7 +298,7 @@ component {
 			"projectType"     : "module",
 			"branch"          : "main",
 			"changelog"       : "CHANGELOG.md",
-			// Empty means "work it out": box.json's testbox.runner, or the fallback below.
+			// An empty value uses testbox.runner from box.json or the fallback URL below.
 			"testRunner"      : "",
 			"runTests"        : true,
 			"gitSync"         : true,
@@ -322,22 +316,21 @@ component {
 	}
 
 	/**
-	 * Adjusts defaults to suit the project type. An app has nowhere to publish on ForgeBox, so
-	 * that step is off unless build.json turns it back on.
+	 * Adjust default settings for the project type. Applications are not normally published to
+	 * ForgeBox, so disable that step unless build.json enables it.
 	 *
 	 * @settings The settings struct, changed in place.
 	 */
 	private void function applyProjectTypeDefaults( required struct settings ){
-		// Only change the default. A build.json that names publish.forgebox itself is left
-		// alone, which is what userTouched() checks.
+		// Keep an explicit publish.forgebox value from build.json. Only replace the default value.
 		if ( lCase( arguments.settings.projectType ) == "app" && !userTouched( "publish.forgebox" ) ) {
 			arguments.settings.publish.forgebox = false;
 		}
 	}
 
 	/**
-	 * Works out the settings that can be read from the project itself, so build.json can stay
-	 * short. Right now that is the test runner URL, taken from box.json's testbox.runner.
+	 * Fill settings that can be read from the project. This keeps build.json short. The current
+	 * project-based setting is the test runner URL from testbox.runner in box.json.
 	 *
 	 * @settings The settings struct, changed in place.
 	 */
@@ -355,12 +348,12 @@ component {
 	}
 
 	/**
-	 * Lays one struct over another. Nested structs are merged key by key so a build.json that
-	 * sets only publish.github keeps the default for publish.forgebox. Arrays replace whatever
-	 * they land on, because a half-replaced exclude list would be a puzzle to debug.
+	 * Merge overlay values into a base struct. Merge nested structs one key at a time. This lets
+	 * build.json set publish.github while keeping the default publish.forgebox value. Replace arrays
+	 * completely because combining part of two ordered lists would create unclear settings.
 	 *
 	 * @base    The starting struct.
-	 * @overlay The values to lay over it.
+	 * @overlay The values that should replace matching base values.
 	 */
 	private struct function merge( required struct base, required struct overlay ){
 		var result = duplicate( arguments.base );
@@ -384,8 +377,8 @@ component {
 	}
 
 	/**
-	 * Reports whether build.json set a key, so defaults that depend on other settings do not
-	 * overwrite a deliberate choice.
+	 * Return true when build.json contains a key. This prevents calculated defaults from replacing
+	 * a value chosen by the developer.
 	 *
 	 * @key The key, for example "publish.forgebox".
 	 */
@@ -394,7 +387,7 @@ component {
 	}
 
 	/**
-	 * Runs each group of validation rules after all defaults are applied.
+	 * Run each group of validation rules after all default values are applied.
 	 *
 	 * @settings The settings struct to check.
 	 */
@@ -485,7 +478,7 @@ component {
 	}
 
 	/**
-	 * The exclude list the build actually uses: the base list plus anything in excludesAdd.
+	 * Return the final exclusion list. It contains excludes followed by excludesAdd.
 	 */
 	array function allExcludes(){
 		var result = duplicate( variables.settings.excludes );
@@ -494,8 +487,8 @@ component {
 	}
 
 	/**
-	 * The address to check when asking "is the test server up?". It is the site root, not the
-	 * test runner: asking for the runner would start the whole suite.
+	 * Return the site root used for the test-server check. Do not return the test runner URL because
+	 * requesting that URL would start the full test suite.
 	 */
 	string function probeUrl(){
 		return reReplaceNoCase( variables.settings.testRunner, "^(https?://[^/]+).*$", "\1" ) & "/";

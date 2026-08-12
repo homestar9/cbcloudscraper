@@ -1,17 +1,15 @@
 /**
- * CloudScraper: make HTTP requests that try to pass Cloudflare protection.
+ * Makes HTTP requests to sites that use Cloudflare protection.
  *
- * Inject this into your model or handler as CloudScraper@cbcloudscraper, then call get()
- * or post(). Each call runs the bundled executable once. The executable tries curl_cffi
- * first (which presents a real browser's TLS fingerprint) and falls back to cloudscraper
- * (which solves Cloudflare's legacy JavaScript challenge).
+ * Inject CloudScraper@cbcloudscraper into a model or handler. Then call get() or post(). Each
+ * request starts the bundled executable once. By default, the executable tries curl_cffi first.
+ * curl_cffi copies the TLS fingerprint used by a real browser. If that fails, the executable
+ * tries cloudscraper, which handles older Cloudflare JavaScript challenges.
  *
- * The returned struct is shaped like the result of a cfhttp call, so it should feel
- * familiar. A 4xx or 5xx response from the site is NOT treated as an error; it comes back
- * with ok=true and the real status code, exactly as cfhttp behaves. Only an operational
- * failure (the binary is missing, the process times out, the output cannot be read)
- * returns ok=false with errorDetail set. Pass options.throwOnError=true to make those
- * operational failures throw instead.
+ * The result struct uses the same basic shape as a cfhttp result. An HTTP 4xx or 5xx status is
+ * still a valid response, so ok remains true and statusCode contains the site's status. A problem
+ * running the executable sets ok to false and adds errorDetail. Set options.throwOnError to true
+ * when the code should throw these process errors instead.
  */
 component singleton accessors="true" {
 
@@ -21,8 +19,8 @@ component singleton accessors="true" {
 	property name="binaryProvisioner" inject="BinaryProvisioner@cbcloudscraper";
 	property name="logger"            inject="logbox:logger:{this}";
 
-	// Limits how many executable processes run at once. Built in onDIComplete because it
-	// depends on the injected settings. Empty string means "no limit".
+	// This semaphore limits how many executable processes can run at once. onDIComplete creates
+	// the semaphore after WireBox injects the settings. An empty string means there is no limit.
 	variables.semaphore = "";
 
 	function init(){
@@ -30,8 +28,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Runs once after WireBox injects the dependencies. Sets up the process limit and
-	 * clears any stale temporary files left by an earlier crash.
+	 * Set the process limit after WireBox finishes dependency injection. Also remove temporary
+	 * files that may remain after an earlier crash.
 	 */
 	function onDIComplete(){
 		var maxProcesses = settings.maxConcurrentProcesses ?: 0;
@@ -43,7 +41,7 @@ component singleton accessors="true" {
 		try {
 			sweepTempFiles();
 		} catch ( any e ) {
-			// Housekeeping is best-effort; never block startup on it.
+			// Startup can continue because an old temporary file does not stop new requests.
 			logger.debug( "cbcloudscraper startup temp sweep failed: " & e.message );
 		}
 		return this;
@@ -53,7 +51,7 @@ component singleton accessors="true" {
 	 * Make a GET request.
 	 *
 	 * @url     The address to fetch.
-	 * @options Optional overrides: engine, impersonate, timeout, headers, followRedirects, verifySSL, proxy, useCookieCache, throwOnError.
+	 * @options Optional engine, impersonate, timeout, headers, followRedirects, verifySSL, proxy, useCookieCache, and throwOnError values.
 	 */
 	struct function get( required string url, struct options = {} ){
 		return send( buildRequest( arguments.url, "GET", "", arguments.options ) );
@@ -63,7 +61,7 @@ component singleton accessors="true" {
 	 * Make a POST request.
 	 *
 	 * @url     The address to post to.
-	 * @body    The request body: a string, a binary value, or a struct of form fields (sent as application/x-www-form-urlencoded).
+	 * @body    A string, binary value, or struct of form fields. A struct is sent as application/x-www-form-urlencoded.
 	 * @options Optional overrides, same as get().
 	 */
 	struct function post(
@@ -82,8 +80,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Pre-fetch the executable now (downloading it if needed) without making a request. Useful
-	 * at application startup or from a scheduled task so the first real request is not delayed.
+	 * Find or download the executable without making an HTTP request. Call this during startup or
+	 * from a scheduled task when the first real request should not wait for a download.
 	 *
 	 * @return The absolute path to the ready-to-run executable.
 	 */
@@ -92,8 +90,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Run a fully prepared request. Both get() and post() call this. Use it directly only
-	 * when you have built the request struct yourself.
+	 * Run a prepared request struct. get() and post() both call this method.
 	 *
 	 * @request A normalized request struct (see buildRequest for the shape).
 	 */
@@ -108,7 +105,7 @@ component singleton accessors="true" {
 		var domain   = extractDomain( req.url );
 		var acquired = false;
 
-		// Decide whether this request uses a stored cookie file.
+		// Use one cookie file per domain when cookie caching is enabled for this request.
 		var jarPath = "";
 		if ( req.useCookieCache ) {
 			jarPath = cookieJar.pathFor( domain );
@@ -116,9 +113,7 @@ component singleton accessors="true" {
 		req[ "cookieJarPath" ] = jarPath;
 
 		try {
-			// Resolve the executable, downloading it on first use if needed. A failure here
-			// (missing binary, no network, checksum mismatch) is reported like any other
-			// operational failure via the catch block below.
+			// Find or download the executable. The catch block below reports any setup failure.
 			var binary = binaryProvisioner.ensureBinary();
 
 			acquired = acquireSlot();
@@ -133,8 +128,7 @@ component singleton accessors="true" {
 				resPath
 			];
 
-			// Give the process a little more time than the HTTP timeout so the worker can
-			// finish writing its response before ProcessRunner would kill it.
+			// Give the executable time to write its response after the HTTP timeout ends.
 			var processTimeout = ( req.timeoutSeconds ?: settings.defaultTimeout ) + 5;
 
 			var runResult = runWithOptionalCookieLock( jarPath, function(){
@@ -203,8 +197,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Delete stored cookie files older than the configured age, plus any leftover
-	 * temporary request/response files. Also callable on demand.
+	 * Delete old cookie files and leftover temporary request or response files.
 	 *
 	 * @olderThanMinutes Files older than this many minutes are removed.
 	 *
@@ -227,11 +220,11 @@ component singleton accessors="true" {
 		return removed;
 	}
 
-	/************************* PRIVATE HELPERS *************************/
+	// Private helpers
 
 	/**
-	 * Merge the caller's loose options with the module defaults into the strict request
-	 * struct that gets written to the JSON file for the executable.
+	 * Merge request options with the module defaults. Return the complete struct that is written
+	 * to the executable's JSON request file.
 	 */
 	private struct function buildRequest(
 		required string url,
@@ -265,7 +258,7 @@ component singleton accessors="true" {
 			)
 		};
 
-		// Per-request headers add to or override the default headers.
+		// Request headers replace default headers with the same name and keep the other defaults.
 		if ( structKeyExists( opts, "headers" ) && isStruct( opts.headers ) ) {
 			structAppend( req.headers, opts.headers, true );
 		}
@@ -276,8 +269,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Turn the request body into a base64 string of its exact bytes. A struct is encoded
-	 * as a URL-encoded form; a binary value is encoded as-is; a string is encoded as UTF-8.
+	 * Convert the request body to base64. Encode structs as URL-encoded forms. Keep binary values
+	 * unchanged before base64 encoding. Encode strings as UTF-8 bytes.
 	 */
 	private string function encodeBody( any body, required struct req ){
 		if ( isNull( arguments.body ) ) {
@@ -307,7 +300,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Convert the worker's raw response into the cfhttp-style result struct.
+	 * Convert the executable's response into a result shaped like cfhttp output.
 	 */
 	private struct function toResponse( required struct raw, required numeric started ){
 		var bodyBytes = binaryDecode( arguments.raw.bodyBase64 ?: "", "base64" );
@@ -317,13 +310,13 @@ component singleton accessors="true" {
 		try {
 			text = charsetEncode( bodyBytes, charset );
 		} catch ( any e ) {
-			// The site named a character set we cannot decode with; fall back to UTF-8.
+			// Use UTF-8 when the CFML engine does not support the response's character set.
 			text    = charsetEncode( bodyBytes, "utf-8" );
 			charset = "utf-8";
 		}
 
-		// A case-insensitive convenience view of the headers. Last value wins for
-		// duplicates; rawHeaders keeps every header line, including multiple Set-Cookie.
+		// Build a case-insensitive header struct for simple lookups. The last duplicate value wins.
+		// rawHeaders keeps every original header, including repeated Set-Cookie headers.
 		var headerStruct = {};
 		for ( var header in ( arguments.raw.headers ?: [] ) ) {
 			headerStruct[ header.name ] = header.value;
@@ -347,8 +340,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Build the ok=false result for an operational failure, or throw when the request
-	 * asked for exceptions.
+	 * Return an ok=false result for a process failure. Throw an exception when throwOnError is true.
 	 */
 	private struct function failure(
 		required struct request,
@@ -381,9 +373,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Run the given function inside a lock when a cookie file is in use, so two requests
-	 * to the same site cannot corrupt that site's cookie file. Different sites are not
-	 * locked against each other, so they still run at the same time.
+	 * Lock one domain's cookie file while a request uses it. This prevents two requests from
+	 * changing the same file at once. Requests for different domains can still run together.
 	 */
 	private any function runWithOptionalCookieLock( required string jarPath, required any invoker ){
 		var fn = arguments.invoker;
@@ -399,7 +390,7 @@ component singleton accessors="true" {
 
 	private boolean function acquireSlot(){
 		if ( isSimpleValue( variables.semaphore ) ) {
-			return false; // no limit configured
+			return false; // No process limit is configured.
 		}
 		var jTimeUnit = createObject( "java", "java.util.concurrent.TimeUnit" );
 		var waitFor   = settings.acquireTimeout ?: 20;
@@ -419,9 +410,9 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Write a UTF-8 file with no byte-order mark. Uses a Java stream so the behavior is
-	 * identical on Lucee, Adobe ColdFusion, and BoxLang (Adobe's FileWrite does not take a
-	 * character-set argument).
+	 * Write a UTF-8 file without a byte-order mark. Use a Java stream because Adobe ColdFusion's
+	 * fileWrite function does not accept a character set. This keeps the output consistent on all
+	 * supported CFML engines.
 	 */
 	private void function writeUtf8File( required string path, required string content ){
 		var stream = createObject( "java", "java.io.FileOutputStream" ).init(
@@ -452,7 +443,7 @@ component singleton accessors="true" {
 				fileDelete( arguments.path );
 			}
 		} catch ( any e ) {
-			// A leftover temp file is swept later; record it only for debugging.
+			// Record the error for debugging. A later cleanup can remove the file.
 			logger.debug( "cbcloudscraper could not delete temp file '" & arguments.path & "': " & e.message );
 		}
 	}
@@ -461,7 +452,7 @@ component singleton accessors="true" {
 		var host = reReplaceNoCase( arguments.url, "^https?://", "", "one" );
 		host     = listFirst( host, "/" );
 		host     = listFirst( host, "?" );
-		// Drop any userinfo prefix and any port suffix.
+		// Remove login information before @ and the port after the host name.
 		if ( find( "@", host ) ) {
 			host = listLast( host, "@" );
 		}
@@ -479,8 +470,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Read a key from a struct, returning a fallback when the key is absent. This avoids
-	 * relying on engine-specific behavior of the ?: operator for missing struct keys.
+	 * Return a struct value or its fallback. CFML engines do not handle the ?: operator the same
+	 * way when a struct key is missing, so this method checks the key directly.
 	 */
 	private any function opt(
 		required struct options,

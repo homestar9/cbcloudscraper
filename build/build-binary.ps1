@@ -44,20 +44,36 @@ Write-Host "  repo:   $RepoRoot"
 Write-Host "  engine: $EngineDir"
 Write-Host "  output: $BinDir\cbcloudscraper.exe"
 
-# --- Pick a Python interpreter (prefer 3.11) -------------------------------------
+# --- Pick a Python interpreter (require 3.11 or older) ---------------------------
+# The cloudscraper25 fallback engine runs its JavaScript challenge through js2py. js2py
+# inspects CPython bytecode at import time and raises "Your python version made changes to
+# the bytecode" on Python 3.12 and newer. A build on 3.12+ still finishes, but the frozen
+# binary's fallback engine crashes the moment it tries to solve a challenge. So the build
+# must use Python 3.11 or older (js2py 0.74 supports 3.6-3.11). 3.11 is recommended.
 function Resolve-Python {
-    # Prefer the 3.11 launcher for the widest wheel coverage and cloudscraper25 support.
+    # Prefer the 3.11 launcher: the newest interpreter js2py supports.
     try {
         $v = & py -3.11 --version 2>$null
         if ($LASTEXITCODE -eq 0) { return @("py", "-3.11") }
     } catch {}
+
+    # Otherwise fall back to whatever "python" is, but only if it is 3.11 or older.
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($null -ne $cmd) {
-        $ver = & python --version 2>&1
-        Write-Host "  note: Python 3.11 launcher not found; using '$ver'. 3.11 is recommended." -ForegroundColor Yellow
-        return @("python")
+        $ver = (& python --version 2>&1).ToString()
+        if ($ver -match "Python\s+(\d+)\.(\d+)") {
+            $major = [int]$matches[1]; $minor = [int]$matches[2]
+            if ($major -eq 3 -and $minor -ge 12) {
+                throw ("Found '$ver', but the cloudscraper25 fallback engine needs Python 3.11 or older " +
+                    "(js2py breaks on 3.12+). Install Python 3.11 (winget install Python.Python.3.11) " +
+                    "so 'py -3.11' resolves, then rebuild.")
+            }
+            Write-Host "  note: Python 3.11 launcher not found; using '$ver'. 3.11 is recommended." -ForegroundColor Yellow
+            return @("python")
+        }
+        throw "Could not determine the version of 'python' (got '$ver'). Install Python 3.11 and rebuild."
     }
-    throw "No Python interpreter found. Install Python 3.11 (or 3.x) and ensure it is on PATH."
+    throw "No Python interpreter found. Install Python 3.11 (winget install Python.Python.3.11) and rebuild."
 }
 
 $PyLauncher = Resolve-Python

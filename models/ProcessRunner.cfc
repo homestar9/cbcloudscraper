@@ -1,29 +1,27 @@
 /**
- * Runs the cbcloudscraper executable once and reports how it finished.
+ * Runs the cbcloudscraper executable and reports the result.
  *
- * This uses Java's ProcessBuilder instead of the cfexecute tag on purpose. Across the
- * engines this module supports (Lucee, Adobe ColdFusion, BoxLang), cfexecute does not
- * reliably return the child's exit code, does not always kill the child when it times
- * out, and reads the child's output with the wrong character set. ProcessBuilder is the
- * same Java class on every engine and handles all three correctly.
+ * This component uses Java's ProcessBuilder instead of cfexecute. The supported CFML engines
+ * do not handle cfexecute in the same way. Depending on the engine, cfexecute may lose the exit
+ * code, leave a timed-out process running, or read output with the wrong character set.
+ * ProcessBuilder handles these cases the same way on Lucee, Adobe ColdFusion, and BoxLang.
  *
- * The child's own output (its diagnostic log) is redirected to a file so a large or
- * chatty child process cannot fill an operating-system pipe buffer and freeze the JVM
- * thread. The real HTTP result is written by the worker to a separate response file, not
- * to standard output.
+ * ProcessBuilder sends all console output to a diagnostic log file. This prevents a large
+ * amount of output from filling the operating system's pipe buffer and freezing the JVM thread.
+ * The executable writes the HTTP result to a separate response file.
  */
 component singleton {
 
 	/**
 	 * Run the executable and wait for it to finish or time out.
 	 *
-	 * @command        Executable path first, then each argument as its own array element (so spaces in paths need no quoting).
+	 * @command        The executable path followed by one array item for each argument. Paths with spaces do not need quotes.
 	 * @logPath        File path where the child's combined output is written.
 	 * @timeoutSeconds Maximum seconds to wait before the child is forcibly stopped.
 	 * @env            Optional struct of extra environment variables for the child process.
 	 * @workingDir     Optional working directory for the child process.
 	 *
-	 * @return struct with keys: exitCode (numeric), timedOut (boolean), logPath (string).
+	 * @return A struct with the numeric exitCode, boolean timedOut, and string logPath values.
 	 */
 	struct function run(
 		required array command,
@@ -35,8 +33,7 @@ component singleton {
 		var jFile     = createObject( "java", "java.io.File" );
 		var jTimeUnit = createObject( "java", "java.util.concurrent.TimeUnit" );
 
-		// Build the command as a java.util.List<String> so it matches the
-		// ProcessBuilder(List) constructor unambiguously on every engine.
+		// Use a Java string list so every CFML engine selects the ProcessBuilder(List) constructor.
 		var cmdList = createObject( "java", "java.util.ArrayList" ).init();
 		for ( var token in arguments.command ) {
 			cmdList.add( javacast( "string", token ) );
@@ -61,8 +58,7 @@ component singleton {
 		var finished = process.waitFor( javacast( "long", arguments.timeoutSeconds ), jTimeUnit.SECONDS );
 
 		if ( !finished ) {
-			// The child ran past the deadline. Kill it and briefly wait so it is fully
-			// stopped and not left running in the background.
+			// Force the process to stop, then wait briefly for the operating system to finish the shutdown.
 			process.destroyForcibly();
 			process.waitFor( javacast( "long", 5 ), jTimeUnit.SECONDS );
 			return {

@@ -1,10 +1,9 @@
 /**
- * Tests for the CloudScraper model.
+ * Tests the CloudScraper model.
  *
- * Most tests inject a MockRunner so they run on any engine and operating system without
- * the real executable. They check that CloudScraper builds the request correctly, decodes
- * the response, maps headers and cookies, and handles operational failures. One test at
- * the end uses the real binary and is skipped automatically when the binary is not built.
+ * Most tests inject MockRunner, so they work on any CFML engine and operating system without the
+ * real executable. They cover request building, response decoding, headers, cookies, and process
+ * failures. The final test uses the real executable and is skipped when that file is not built.
  */
 component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
@@ -17,8 +16,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 	}
 
 	function run(){
-		// Is the real Windows binary present locally? Used to decide whether to run the live
-		// test. The binary is no longer a fixed setting, so check its default location.
+		// Check the default Windows build path before enabling the live executable test.
 		var hasBinary = fileExists( expandPath( "/cbcloudscraper/bin/win64/cbcloudscraper.exe" ) );
 
 		describe( "CloudScraper", function(){
@@ -28,14 +26,13 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
 			beforeEach( function(){
 				cs         = getInstance( "CloudScraper@cbcloudscraper" );
-				realRunner = cs.getRunner(); // keep the real runner to restore later
+				realRunner = cs.getRunner(); // Save the real runner so afterEach() can restore it.
 				mockRunner = new tests.resources.MockRunner();
-				cs.setRunner( mockRunner ); // swap in the mock for this test
+				cs.setRunner( mockRunner ); // Prevent unit tests from starting the real executable.
 			} );
 
 			afterEach( function(){
-				// CloudScraper is a singleton; put the real runner back so other tests and
-				// the live test are not affected.
+				// CloudScraper is a singleton. Restore the runner so this test cannot affect later tests.
 				cs.setRunner( realRunner );
 			} );
 
@@ -48,7 +45,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				expect( result.fileContent ).toBe( "Hello, cbcloudscraper!" );
 				expect( result.charset ).toBe( "utf-8" );
 
-				// Convenience header struct plus the full raw header list.
+				// Check the simple header struct and the complete ordered header list.
 				expect( result.headers ).toHaveKey( "Content-Type" );
 				expect( result.rawHeaders.len() ).toBe( 2 );
 
@@ -145,7 +142,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				title = "fetches a live URL through the real binary (Windows, built binary only)",
 				skip  = !hasBinary,
 				body  = function(){
-					// Use the real runner instead of the mock for this one test.
+					// Use the real process runner for this integration test.
 					cs.setRunner( getInstance( "ProcessRunner@cbcloudscraper" ) );
 
 					var result = cs.get( "https://example.com" );

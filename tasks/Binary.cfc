@@ -1,20 +1,20 @@
 /**
- * CommandBox task to install, update, or check the cbcloudscraper executable.
+ * Installs, updates, or checks the cbcloudscraper executable from CommandBox.
  *
- * Run it from the app that has the module installed:
+ * Run one of these commands from an application that has the module installed:
  *
- *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc                       (status)
- *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install       (fetch it now)
- *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=update        (refresh if stale)
+ *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc
+ *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install
+ *   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=update
  *
- * This is a convenience for pre-fetching at deploy time. It is not required: the module also
- * downloads the binary automatically on the first request. The download logic is shared with
- * the app runtime through models/BinaryDownloader.cfc, so both behave the same way.
+ * Use this task to download the executable during deployment. Running it is optional because
+ * the module can download the executable on the first request. This task and the application
+ * both use models/BinaryDownloader.cfc, so they follow the same download rules.
  */
 component {
 
 	/**
-	 * @action    status | install | update. Defaults to status.
+	 * @action    The action to run: status, install, or update. Defaults to status.
 	 * @directory Where to install the binary. Defaults to the module's own bin/ folder.
 	 * @tag       Force a release tag, for example v1.0.0. Defaults to "v" + the module version.
 	 * @baseURL   Force the release download base URL. Defaults to the module's repository releases.
@@ -29,7 +29,7 @@ component {
 	){
 		var moduleRoot = resolveModuleRoot();
 
-		// Make the module's components loadable from this CLI task, then build the downloader.
+		// Add a CFML mapping so this task can create the shared BinaryDownloader component.
 		fileSystemUtil.createMapping( "cbcloudscraperKit", moduleRoot );
 		var downloader = new cbcloudscraperKit.models.BinaryDownloader();
 
@@ -91,7 +91,7 @@ component {
 	}
 
 	/**
-	 * Print the installed-vs-wanted binary versions and whether they are in sync.
+	 * Print the installed version, required version, and whether the versions match.
 	 */
 	private function printStatus(
 		required any downloader,
@@ -120,7 +120,7 @@ component {
 	}
 
 	/**
-	 * The module root is the folder above this task's own tasks/ folder.
+	 * Return the module directory that contains this task's tasks directory.
 	 */
 	private string function resolveModuleRoot(){
 		var taskDir = reReplace(

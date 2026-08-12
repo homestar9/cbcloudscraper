@@ -1,18 +1,17 @@
 /**
- * Makes sure the cbcloudscraper executable is present, downloading it if needed.
+ * Finds a usable cbcloudscraper executable and downloads one when needed.
  *
- * The binary is not stored in the git repository. It is published as a per-platform asset on
- * the module's GitHub Releases. The first time a request runs, this component checks for the
- * binary and, if it is missing or is for a different module version, downloads the build that
- * matches the current operating system, verifies its checksum, and unpacks it. Every later
- * request finds the correct binary already in place and returns immediately. This follows the
- * approach the commandbox-cfformat module uses for its native helper.
+ * Git does not store the executable. Each GitHub Release provides a separate download for each
+ * supported operating system. On the first request, this component checks the cached executable.
+ * BinaryProvisioner downloads, verifies, and unpacks the correct file when the cache is missing
+ * or out of date.
+ * Later requests return the cached path without downloading the file again.
  *
- * The download itself lives in BinaryDownloader, a plain component shared with the CommandBox
- * task (tasks/Binary.cfc) so the app and the CLI behave identically.
+ * BinaryDownloader contains the download code. The application and tasks/Binary.cfc both use
+ * BinaryDownloader, so both entry points follow the same rules.
  *
- * A host application can skip all of this by setting the "binaryPath" module setting to an
- * executable it placed itself (useful on servers with no outbound internet access).
+ * An application can set binaryPath to use an executable that is already on the server. This
+ * option is useful when the server cannot download files from the internet.
  */
 component singleton accessors="true" {
 
@@ -21,12 +20,12 @@ component singleton accessors="true" {
 	property name="logger"     inject="logbox:logger:{this}";
 
 	/**
-	 * Return the absolute path to a ready-to-run executable, downloading it if necessary.
-	 * Throws cbcloudscraper.BinaryUnavailable when the binary is missing or out of date and
-	 * cannot be obtained (download turned off, no network, or a checksum mismatch).
+	 * Return the full path to a usable executable. Download the executable when needed.
+	 *
+	 * Throw cbcloudscraper.BinaryUnavailable when the executable cannot be used or downloaded.
 	 */
 	string function ensureBinary(){
-		// 1. An explicit path always wins. The host placed the binary itself.
+		// Use binaryPath first because the application provided that executable directly.
 		var explicitPath = settings.binaryPath ?: "";
 		if ( len( explicitPath ) ) {
 			if ( fileExists( explicitPath ) ) {
@@ -42,12 +41,12 @@ component singleton accessors="true" {
 		var baseDir = getBinaryDirectory();
 		var tag     = getReleaseTag();
 
-		// 2. The correct version is already present (a prior download, or a local dev build).
+		// Reuse a current download or an untagged local development build.
 		if ( downloader.isCurrent( baseDir, tag ) ) {
 			return downloader.binaryPathFor( baseDir );
 		}
 
-		// 3. Not current. Either download it or fail with a clear message.
+		// The cached executable is missing or outdated. Download it or report why that is disabled.
 		if ( !( settings.autoDownloadBinary ?: true ) ) {
 			throw(
 				type    = "cbcloudscraper.BinaryUnavailable",
@@ -58,7 +57,7 @@ component singleton accessors="true" {
 			);
 		}
 
-		// One request at a time downloads; the rest wait and then find the file in place.
+		// Allow one download at a time. Waiting requests reuse the file after the download finishes.
 		lock name="cbcloudscraper-binary-#hash( baseDir, "MD5" )#" type="exclusive" timeout="300" {
 			if ( downloader.isCurrent( baseDir, tag ) ) {
 				return downloader.binaryPathFor( baseDir );
@@ -77,12 +76,12 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Download the binary for the current module version, replacing any cached copy. Used by the
-	 * CommandBox task and available to app code that wants to pre-install at startup.
+	 * Download the executable for the current module version and replace the cached copy.
+	 * Application startup code can call this method to download the file before the first request.
 	 *
-	 * @force Download even when the cache already matches the wanted version.
+	 * @force Download even when the cache already matches the requested version.
 	 *
-	 * @return The BinaryDownloader result struct { action, path, tag, present }.
+	 * @return The BinaryDownloader result with action, path, tag, and present values.
 	 */
 	struct function install( boolean force = true ){
 		return downloader.ensure(
@@ -96,9 +95,9 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Report the state of the cached binary without downloading anything.
+	 * Return the cached executable's status without downloading anything.
 	 *
-	 * @return struct { present, installedTag, moduleTag, targetTag, inSync, path }.
+	 * @return A struct with present, installedTag, moduleTag, targetTag, inSync, and path values.
 	 */
 	struct function status(){
 		var baseDir = getBinaryDirectory();
@@ -113,7 +112,7 @@ component singleton accessors="true" {
 		};
 	}
 
-	/************************* PRIVATE HELPERS *************************/
+	// Private helpers
 
 	private string function getModuleRoot(){
 		return reReplace( expandPath( "/cbcloudscraper" ), "[\\/]$", "" );

@@ -1,46 +1,43 @@
 ﻿component extends="coldbox.system.ioc.config.Binder"{
 
-	/**
-	* Configure WireBox, that's it!
-	*/
+	/** Configure dependency injection for the test application. */
 	function configure(){
 
-		// The WireBox configuration structure DSL
+		// Main WireBox settings
 		wireBox = {
-			// Scope registration, automatically register a wirebox injector instance on any CF scope
-			// By default it registeres itself on application scope
+			// Store the WireBox injector in application.wireBox.
 			scopeRegistration = {
 				enabled = true,
-				scope   = "application", // server, cluster, session, application
+				scope   = "application", // Other valid scopes are server, cluster, and session.
 				key		= "wireBox"
 			},
 
-			// DSL Namespace registrations
+			// Custom dependency-injection namespaces
 			customDSL = {
-				// namespace = "mapping name"
+				// Example: namespace = "mapping name"
 			},
 
-			// Custom Storage Scopes
+			// Custom object scopes
 			customScopes = {
-				// annotationName = "mapping name"
+				// Example: annotationName = "mapping name"
 			},
 
-			// Package scan locations
+			// Packages that WireBox should scan for components
 			scanLocations = [],
 
-			// Stop Recursions
+			// Classes where recursive dependency lookup should stop
 			stopRecursions = [],
 
-			// Parent Injector to assign to the configured injector, this must be an object reference
+			// Optional parent injector object
 			parentInjector = "",
 
-			// Register all event listeners here, they are created in the specified order
+			// Event listeners, created in the listed order
 			listeners = [
-				// { class="", name="", properties={} }
+				// Example: { class="", name="", properties={} }
 			]
 		};
 
-		// Map Bindings below
+		// Add test-specific dependency bindings here.
 	}
 
 }

@@ -1,74 +1,73 @@
 /**
- * cbcloudscraper — make HTTP requests through Cloudflare protection in ColdBox.
- * Copyright 2026 Angry Sam Productions, Inc.. Licensed under the Apache License, Version 2.0.
+ * Adds Cloudflare-aware HTTP requests to ColdBox applications.
+ * Copyright 2026 Angry Sam Productions, Inc. Licensed under the Apache License, Version 2.0.
  */
 component {
 
-	// Module Properties
+	// Basic module information
 	this.title       = "cbcloudscraper";
 	this.author      = "Angry Sam Productions, Inc.";
 	this.webURL      = "https://github.com/homestar9/cbcloudscraper";
 	this.description = "Make HTTP requests through Cloudflare protection in ColdBox using cloudscraper and curl_cffi.";
 	this.version     = "@build.version@+@build.number@";
 
-	// Model Namespace
+	// WireBox namespace for this module's models
 	this.modelNamespace = "cbcloudscraper";
 
-	// CF Mapping
+	// CFML mapping for this module
 	this.cfmapping = "cbcloudscraper";
 
-	// Dependencies
+	// This module does not depend on other ColdBox modules.
 	this.dependencies = [];
 
 	/**
-	 * Configure Module.
+	 * Set the module's default options.
 	 *
-	 * Sets the module's default settings. A host application can override any of these through
-	 * moduleSettings.cbcloudscraper in its own config/ColdBox.cfc. The executable itself is
-	 * resolved and downloaded on first use by BinaryProvisioner.
+	 * An application can override these options in moduleSettings.cbcloudscraper inside
+	 * config/ColdBox.cfc. BinaryProvisioner finds or downloads the executable on the first request.
 	 */
 	function configure(){
 		var tmpRoot        = createObject( "java", "java.lang.System" ).getProperty( "java.io.tmpdir" );
 		var defaultWorkDir = reReplace( tmpRoot, "[\\/]$", "" ) & "/cbcloudscraper";
 
 		settings = {
-			// ── Binary provisioning ────────────────────────────────────────────────
-			// The executable is not stored in git. It is downloaded from GitHub Releases on
-			// first use and cached. Set binaryPath to skip that and use an executable you
-			// placed yourself (for example on a server with no outbound internet access).
-			"binaryPath"             : "", // "" = auto-resolve and download when missing
-			"binaryDirectory"        : "", // "" = the module's own bin/ folder
-			"autoDownloadBinary"     : true, // false = require a pre-placed binary
-			"binaryBaseURL"          : "", // "" = derive from box.json repository.url
-			"binaryReleaseTag"       : "", // "" = derive "v" + the module version
+			// Binary setup
+			// Git does not store the executable. The module downloads it from GitHub Releases
+			// on the first request and then caches it. Set binaryPath to use your own executable.
+			// A custom path is useful on a server that cannot download files from the internet.
+			"binaryPath"             : "", // Leave empty to find or download the executable.
+			"binaryDirectory"        : "", // Leave empty to use this module's bin directory.
+			"autoDownloadBinary"     : true, // Set false when you provide the executable yourself.
+			"binaryBaseURL"          : "", // Leave empty to use repository.url from box.json.
+			"binaryReleaseTag"       : "", // Leave empty to use "v" plus the module version.
 			"verifyChecksum"         : true,
-			// ── Request defaults ───────────────────────────────────────────────────
-			"defaultTimeout"         : 30, // seconds
-			"engineOrder"            : [ "curl_cffi", "cloudscraper" ], // order tried in "auto"
-			"defaultEngine"          : "auto", // auto | curl_cffi | cloudscraper
-			"impersonate"            : "chrome", // curl_cffi browser profile
+			// Request defaults
+			"defaultTimeout"         : 30, // Maximum request time in seconds.
+			"engineOrder"            : [ "curl_cffi", "cloudscraper" ], // Order used by the auto engine.
+			"defaultEngine"          : "auto", // Valid values: auto, curl_cffi, or cloudscraper.
+			"impersonate"            : "chrome", // Browser profile used by curl_cffi.
 			"followRedirects"        : true,
 			"verifySSL"              : true,
 			"defaultHeaders"         : {},
-			"defaultCharset"         : "utf-8", // fallback when the site does not name one
-			"proxy"                  : "", // "" = no proxy
-			// ── Temp files ─────────────────────────────────────────────────────────
+			"defaultCharset"         : "utf-8", // Used when the response does not name a character set.
+			"proxy"                  : "", // Leave empty to connect without a proxy.
+			// Temporary files
 			"workingDirectory"       : defaultWorkDir,
-			"keepFailureLogs"        : false, // keep the diagnostic log on failure
-			"tempSweepMinutes"       : 30, // remove temp files older than this
-			// ── Cookie storage ─────────────────────────────────────────────────────
+			"keepFailureLogs"        : false, // Keep the diagnostic log after a failed request.
+			"tempSweepMinutes"       : 30, // Delete temporary files older than this many minutes.
+			// Cookie storage
 			"cookieCache"            : { "enabled" : false, "directory" : "" },
-			// ── Concurrency ────────────────────────────────────────────────────────
-			"maxConcurrentProcesses" : 8, // 0 = no limit
-			"acquireTimeout"         : 20, // seconds to wait for a free slot
+			// Process limits
+			"maxConcurrentProcesses" : 8, // Set 0 to allow any number of processes.
+			"acquireTimeout"         : 20, // Seconds to wait for an open process slot.
 			"throwOnError"           : false
 		};
 	}
 
 	/**
-	 * Fired when the module is registered and activated. Creates the directories the module
-	 * writes to. The executable is resolved and downloaded on first use, so nothing about it
-	 * is checked here.
+	 * Create the directories that the module needs when ColdBox loads the module.
+	 *
+	 * This method does not check the executable. BinaryProvisioner checks it on the first request.
 	 */
 	function onLoad(){
 		if ( !directoryExists( settings.workingDirectory ) ) {
@@ -80,13 +79,13 @@ component {
 		if ( ( settings.cookieCache.enabled ?: false ) && !directoryExists( cookieDir ) ) {
 			directoryCreate( cookieDir, true, true );
 		}
-		// The executable is resolved and downloaded on first use by BinaryProvisioner, so
-		// there is nothing to check here at load time.
+		// BinaryProvisioner checks the executable on the first request.
 	}
 
 	/**
-	 * Fired when the module is unregistered and unloaded. Nothing to tear down: each
-	 * request runs its own short-lived process, so there is no background service.
+	 * Handle module shutdown.
+	 *
+	 * No cleanup is needed because each request uses a short-lived process.
 	 */
 	function onUnload(){
 	}

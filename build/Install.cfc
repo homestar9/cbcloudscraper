@@ -1,17 +1,17 @@
 /**
- * Adds the build kit files and commands to a CFML project.
+ * Adds this build kit's files and commands to a CFML project.
  *
  * Run `box task run taskFile=build/Install.cfc` from the project root. The task creates
  * build/build.json, adds release scripts to box.json, creates a changelog when needed, and
  * copies RELEASE.md into the project root.
  *
- * The task keeps existing files unless `:force=true` is passed. It detects useful defaults
- * from box.json, Git, and root-level server JSON files.
+ * The task keeps existing files unless you pass `:force=true`. It reads box.json, Git, and
+ * server JSON files in the project root to choose useful default settings.
  */
 component {
 
 	/**
-	 * Runs each installation step and prints the detected settings.
+	 * Run each installation step and print the settings found in the project.
 	 *
 	 * @force Overwrite files that already exist.
 	 */
@@ -47,10 +47,10 @@ component {
 			.toConsole();
 	}
 
-	// INSTALLATION STEPS
+	// Installation steps
 
 	/**
-	 * Writes build/build.json, filling in what it can work out from the project.
+	 * Write build/build.json and fill in settings found in the project.
 	 *
 	 * @force Overwrite an existing file.
 	 */
@@ -89,8 +89,8 @@ component {
 	}
 
 	/**
-	 * Reports whether build.json is the starter file shipped with this kit. Only a marked
-	 * starter can be replaced without force; malformed and user-owned files remain untouched.
+	 * Return true when build.json is the starter file included with this kit. The installer can
+	 * replace a marked starter file without force. It does not replace custom or invalid files.
 	 *
 	 * @path The build.json file to inspect.
 	 */
@@ -106,7 +106,7 @@ component {
 	}
 
 	/**
-	 * Adds missing build-kit scripts to box.json. It never replaces an existing script.
+	 * Add missing build-kit scripts to box.json. Keep every existing script unchanged.
 	 */
 	private function patchBoxJSON(){
 		var packagePath = variables.root & "/box.json";
@@ -160,7 +160,7 @@ component {
 	}
 
 	/**
-	 * Creates a changelog with an [Unreleased] section when the project has none.
+	 * Create a changelog with an [Unreleased] section when the project does not have one.
 	 *
 	 * @force Overwrite an existing changelog.
 	 */
@@ -183,8 +183,7 @@ component {
 	}
 
 	/**
-	 * Copies RELEASE.md into the project root so the routine is written down where people
-	 * will find it.
+	 * Copy RELEASE.md into the project root so contributors can find the release steps.
 	 *
 	 * @force Overwrite an existing RELEASE.md.
 	 */
@@ -203,12 +202,12 @@ component {
 		print.greenLine( "  made  RELEASE.md" ).toConsole();
 	}
 
-	// PROJECT DETECTION
+	// Project detection
 
 	/**
-	 * Uses Gitflow's configured production branch when present. Otherwise reads the current
-	 * symbolic branch through git, which also works in linked worktrees, and falls back to main
-	 * for a detached checkout or a folder without usable git metadata.
+	 * Return Gitflow's production branch when it is configured. Otherwise, ask Git for the current
+	 * branch. Asking Git also works in linked worktrees. Return main for a detached checkout or
+	 * when Git metadata is not available.
 	 */
 	private string function detectBranch(){
 		try {
@@ -223,20 +222,18 @@ component {
 				return trim( current.output );
 			}
 		} catch ( any ignored ) {
-			// Installation can still produce a useful starter config when git is unavailable.
+			// The installer can still create a useful starter configuration without Git.
 		}
 		return "main";
 	}
 
 	/**
-	 * Returns the name of the changelog the project already has, spelled exactly as it is on
-	 * disk. Falls back to CHANGELOG.md, which is the usual spelling.
+	 * Return the existing changelog filename with the same letter case used on disk. Return
+	 * CHANGELOG.md when the project does not have a changelog.
 	 *
-	 * It reads the real directory listing rather than testing names one at a time. On Windows
-	 * and macOS, fileExists( "changelog.md" ) is true even when the file is really called
-	 * CHANGELOG.md, so testing names would happily report a spelling that does not exist. That
-	 * name then goes into build.json and works locally while failing on Linux, where the case
-	 * has to match.
+	 * Read the directory listing instead of calling fileExists for possible names. Windows and
+	 * macOS may report that changelog.md exists when the file is named CHANGELOG.md. Linux requires
+	 * the exact letter case. Saving the wrong case in build.json would fail on Linux.
 	 */
 	private string function detectChangelogName(){
 		for ( var name in directoryList( variables.root, false, "name", "*.md" ) ) {
@@ -248,17 +245,16 @@ component {
 	}
 
 	/**
-	 * Returns the test runner detected by ProjectSettingsService.
+	 * Return the test runner URL chosen by ProjectSettingsService.
 	 *
-	 * @box The parsed box.json. This wrapper remains private to keep file detection readable.
+	 * @box The parsed box.json data.
 	 */
 	private string function detectTestRunner( required struct box ){
 		return variables.projectSettings.detectTestRunner( arguments.box );
 	}
 
 	/**
-	 * Finds the server json files in the project root and turns them into engine entries, with
-	 * a readable name worked out from each file name.
+	 * Find server JSON files in the project root and build an engine entry for each file.
 	 */
 	private array function detectEngines(){
 		var engines = [];
@@ -275,8 +271,8 @@ component {
 	}
 
 	/**
-	 * Reads one server file and asks ProjectSettingsService to choose its display name.
-	 * A malformed file still appears in the generated settings with a name based on its file.
+	 * Read one server file and ask ProjectSettingsService to choose its display name. If the JSON
+	 * is invalid, use a name based on the filename so the generated settings still include it.
 	 *
 	 * @file The server json file name.
 	 */
@@ -286,17 +282,17 @@ component {
 			var parsedSettings = deserializeJSON( fileRead( variables.root & "/" & arguments.file ) );
 			serverSettings = isStruct( parsedSettings ) ? parsedSettings : {};
 		} catch ( any ignoredException ) {
-			// The server command will report invalid JSON when someone starts this server.
+			// CommandBox will report the invalid JSON when a developer starts this server.
 		}
 
 		return variables.projectSettings.engineName( arguments.file, serverSettings );
 	}
 
-	// OUTPUT HELPERS
+	// Output helpers
 
 	/**
-	 * Turns a struct into readable JSON. CommandBox's own formatter is used when available so
-	 * the result matches how it writes box.json.
+	 * Convert a struct to readable JSON. Use the CommandBox formatter when it is available so the
+	 * result matches the formatting in box.json.
 	 *
 	 * @data The struct to write.
 	 */
@@ -310,13 +306,12 @@ component {
 	}
 
 	/**
-	 * The starter changelog, used when the templates folder is missing.
+	 * Return the starter changelog when the template file is missing.
 	 */
 	private string function defaultChangelog(){
 		var lf = chr( 10 );
-		// Build the markdown headings from chr( 35 ) rather than writing hashes in the string.
-		// A # starts a variable in CFML, so hashes have to be doubled, and counting them for a
-		// three-hash heading is a good way to write a bug.
+		// Build Markdown headings with chr(35). A # starts a CFML expression inside a string, so
+		// writing heading markers directly would require extra escaping and be easy to count wrong.
 		var h1 = repeatString( chr( 35 ), 1 ) & " ";
 		var h2 = repeatString( chr( 35 ), 2 ) & " ";
 		var h3 = repeatString( chr( 35 ), 3 ) & " ";

@@ -1,19 +1,19 @@
 ﻿component{
 
-	// Configure ColdBox Application
+	// Configure the ColdBox test application.
 	function configure(){
 
-		// coldbox directives
+		// Main ColdBox settings
 		coldbox = {
-			//Application Setup
+			// Application name
 			appName 				= "Module Tester",
 
-			//Development Settings
+			// Development settings
 			reinitPassword			= "",
 			handlersIndexAutoReload = true,
 			modulesExternalLocation = [],
 
-			//Implicit Events
+			// Optional application events
 			defaultEvent			= "",
 			requestStartHandler		= "",
 			requestEndHandler		= "",
@@ -23,38 +23,37 @@
 			sessionEndHandler		= "",
 			missingTemplateHandler	= "",
 
-			//Error/Exception Handling
+			// Error handling
 			exceptionHandler		= "",
 			onInvalidEvent			= "",
 			customErrorTemplate 	= "/coldbox/system/exceptions/Whoops.cfm",
 
-			//Application Aspects
+			// Disable handler and event caching during tests.
 			handlerCaching 			= false,
 			eventCaching			= false
 		};
 
-		// environment settings, create a detectEnvironment() method to detect it yourself.
-		// create a function with the name of the environment so it can be executed if that environment is detected
-		// the value of the environment is a list of regex patterns to match the cgi.http_host.
+		// Match local host names to the development environment. Add a method named after an
+		// environment when that environment needs its own settings.
 		environments = {
 			development = "localhost,127\.0\.0\.1"
 		};
 
-		// Module Directives
+		// Module loading rules
 		modules = {
-			// An array of modules names to load, empty means all of them
+			// An empty include list allows all discovered modules.
 			include = [],
-			// An array of modules names to NOT load, empty means none
+			// An empty exclude list blocks no modules.
 			exclude = []
 		};
 
-		//Register interceptors as an array, we need order
+		// Register interceptors in the order they should run.
 		interceptors = [
 		];
 
-		//LogBox DSL
+		// LogBox settings
 		logBox = {
-			// Define Appenders
+			// Send logs to the console and a rolling file.
 			appenders = {
 				myConsole : { class : "ConsoleAppender" },
 				files : {
@@ -64,16 +63,16 @@
 					}
 				}
 			},
-			// Root Logger
+			// Root logger
 			root = { levelmax="DEBUG", appenders="*" },
-			// Implicit Level Categories
+			// Log ColdBox system messages at the info level.
 			info = [ "coldbox.system" ]
 		};
 
 	}
 
 	/**
-	 * Load the Module you are testing
+	 * Load and activate the module under test.
 	 */
 	function afterAspectsLoad( event, interceptData, rc, prc ){
 
@@ -83,9 +82,9 @@
 				invocationPath 	= "moduleroot"
 			);
 
-        // Reload the renderer in case we have module helpers
+		// Restart the renderer so it includes helpers from the loaded module.
         controller.getRenderer().startup()
-        // Reload all interceptors with new mixins if available.
+		// Tell interceptors to load any helper methods added by the module.
         controller.getInterceptorService().announce( "cbLoadInterceptorHelpers" )
 	}
 

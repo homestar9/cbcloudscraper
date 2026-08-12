@@ -1,16 +1,16 @@
 /**
- * Updates the project version and changelog for a release.
+ * Updates the project version and changelog before a release.
  *
  * Run `box run-script bump:patch`, `bump:minor`, or `bump:major` from the project root.
  * The task updates the version in box.json. It also moves the [Unreleased] notes into a dated
  * section for the new version.
  *
- * The task does not commit, tag, or publish anything. Use `:dryRun=true` to preview the file
- * changes. Use `:level=none` for a first release that already has the correct version number.
+ * This task does not commit, tag, or publish anything. Use `:dryRun=true` to preview the changes.
+ * Use `:level=none` when the first release already has the correct version number.
  */
 component {
 
-	/** Loads the shared settings and the two services used by this task. */
+	/** Load the shared settings and helper services. */
 	function init(){
 		variables.config           = new BuildConfig( getDirectoryFromPath( getCurrentTemplatePath() ) );
 		variables.settings         = variables.config.getSettings();
@@ -20,15 +20,14 @@ component {
 	}
 
 	/**
-	 * Calculates both file changes before writing either file.
+	 * Calculate both file changes before writing either file.
 	 *
-	 * @level  How much to raise. See the list in nextVersion(), or run with an unknown level to
-	 *         have them printed.
+	 * @level  How much to change the version. Pass an unknown level to print the valid values.
 	 * @preid  The prerelease label to use, such as beta or alpha. Only used by the pre levels.
 	 *         Defaults to beta when starting a prerelease.
 	 * @dryRun Show what would change without writing anything.
 	 * @allowPrereleaseRetarget Allow preminor to move an active prerelease to the next minor
-	 *                          version. Defaults to false to prevent accidental retargeting.
+	 *                          version. Defaults to false so the version cannot move by accident.
 	 */
 	function run(
 		string level = "patch",
@@ -80,8 +79,8 @@ component {
 				);
 			}
 
-			// Calculate the complete changelog first. This prevents a partial update when the
-			// [Unreleased] section is missing or empty.
+			// Build the complete changelog first. Do not update box.json when the [Unreleased]
+			// section is missing or empty.
 			newChangelog = buildChangelog( newVersion, releaseDate );
 		} catch ( any exception ) {
 			if ( exception.type == "BuildVersion.NotPrerelease" ) {
@@ -134,15 +133,13 @@ component {
 			.toConsole();
 	}
 
-	// PRIVATE HELPERS
+	// Private helpers
 
 	/**
-	 * Stops the task, printing guidance that spans several lines.
+	 * Print several lines of help, then stop the task with one error line.
 	 *
-	 * CommandBox's error() removes line breaks from its message, so anything longer than a
-	 * sentence arrives as one run-together block. The guidance is printed first, where it keeps
-	 * its shape, and error() is left with the single line that says what went wrong. That is
-	 * also why the list appears above the error rather than below it: error() ends the task.
+	 * CommandBox removes line breaks from error() messages. Print the detailed help first so its
+	 * line breaks remain readable. Then pass only the summary to error(), which ends the task.
 	 *
 	 * @summary One line saying what went wrong.
 	 * @detail  Lines of guidance to print first.
@@ -160,8 +157,7 @@ component {
 	}
 
 	/**
-	 * Writes the new version into box.json, replacing only that one value so the rest of the
-	 * file keeps its formatting.
+	 * Replace only the version value in box.json so the rest of the file keeps its formatting.
 	 *
 	 * @version The new version.
 	 */
@@ -169,10 +165,9 @@ component {
 		var boxPath    = variables.config.repoPath( "box.json" );
 		var packageText = fileRead( boxPath );
 
-		// Find the first "version":"..." and replace what sits between the quotes. This splices
-		// the text rather than using a replacement pattern: a pattern like "\1" placed directly
-		// before a version starting with a digit reads as a different group number and eats
-		// characters.
+		// Replace the text between the first version property's quotes. Do not use a regex replacement
+		// group here. A group such as "\1" followed by a version digit can be read as a larger group
+		// number and remove characters from the result.
 		var versionMatch = reFind( '("version"\s*:\s*")([^"]*)(")', packageText, 1, true );
 		if ( !arrayLen( versionMatch.pos ) || versionMatch.pos[ 1 ] == 0 ) {
 			return error( "Could not find a ""version"" entry in box.json." );
@@ -188,7 +183,7 @@ component {
 	}
 
 	/**
-	 * Reads the changelog and asks ChangelogService to build the updated text.
+	 * Read the changelog and ask ChangelogService to build the updated text.
 	 *
 	 * @version The version to date the section with.
 	 * @date    Today, as YYYY-MM-DD.

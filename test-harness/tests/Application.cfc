@@ -1,33 +1,33 @@
 /**
  * Copyright 2005-2007 ColdBox Framework by Luis Majano and Ortus Solutions, Corp
- * www.ortussolutions.com
- * ---
+ *
+ * Starts the isolated ColdBox application used by the TestBox suite.
  */
 component {
 
-	// The name of the module used in cfmappings ,etc
+	// Public module name used in CFML mappings
 	request.MODULE_NAME = "cbcloudscraper";
-	// The directory name of the module on disk. Usually, it's the same as the module name
+	// Directory name of the module in this repository
 	request.MODULE_PATH = "cbcloudscraper";
 
-	// APPLICATION CFC PROPERTIES
+	// CFML application settings
 	this.name                 = "#request.MODULE_NAME# Testing Suite";
 	this.sessionManagement    = true;
 	this.sessionTimeout       = createTimespan( 0, 0, 15, 0 );
 	this.applicationTimeout   = createTimespan( 0, 0, 15, 0 );
 	this.setClientCookies     = true;
-	// Turn on/off white space management
+	// Use smart whitespace handling during tests.
 	this.whiteSpaceManagement = "smart";
 	this.enableNullSupport    = shouldEnableFullNullSupport();
 
-	// Create testing mapping
+	// Map /tests to this directory.
 	this.mappings[ "/tests" ] = getDirectoryFromPath( getCurrentTemplatePath() );
 
-	// The application root
+	// Map /root to the test harness directory.
 	rootPath                 = reReplaceNoCase( this.mappings[ "/tests" ], "tests(\\|/)", "" );
 	this.mappings[ "/root" ] = rootPath;
 
-	// The module root path
+	// Find and map the module directory.
 	moduleRootPath = reReplaceNoCase(
 		rootPath,
 		"#request.MODULE_PATH#(\\|/)test-harness(\\|/)",
@@ -36,7 +36,7 @@ component {
 	this.mappings[ "/moduleroot" ]            = moduleRootPath;
 	this.mappings[ "/#request.MODULE_NAME#" ] = moduleRootPath & "#request.MODULE_PATH#";
 
-	// ORM Definitions
+	// Optional ORM settings for modules that need a database
 	/**
 	this.datasource = "coolblog";
 	this.ormEnabled = "true";
@@ -54,17 +54,17 @@ component {
 	**/
 
 	function onRequestStart( required targetPage ){
-		// Set a high timeout for long running tests
+		// Allow enough time for slow integration tests.
 		setting requestTimeout   ="9999";
-		// New ColdBox Virtual Application Starter
+		// Create an isolated ColdBox application for this request.
 		request.coldBoxVirtualApp= new coldbox.system.testing.VirtualApp( appMapping = "/root" );
 
-		// If hitting the runner or specs, prep our virtual app
+		// Start the virtual application for test-runner and spec requests.
 		if ( getBaseTemplatePath().replace( expandPath( "/tests" ), "" ).reFindNoCase( "(runner|specs)" ) ) {
 			request.coldBoxVirtualApp.startup( true );
 		}
 
-		// ORM Reload for fresh results
+		// Restart ColdBox when the request asks for framework reinitialization.
 		if ( structKeyExists( url, "fwreinit" ) ) {
 			if ( structKeyExists( server, "lucee" ) ) {
 				pagePoolClear();

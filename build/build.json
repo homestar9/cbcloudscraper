@@ -2,7 +2,7 @@
     "templateVersion":"1.0.0",
     "projectType":"module",
     "branch":"master",
-    "changelog":"changelog.md",
+    "changelog":"CHANGELOG.md",
     "testRunner":"http://localhost:60299/tests/runner.cfm",
     "runTests":true,
     "publish":{

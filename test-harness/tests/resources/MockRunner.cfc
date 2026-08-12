@@ -1,22 +1,21 @@
 /**
- * Test stand-in for ProcessRunner.
+ * Replaces ProcessRunner during unit tests.
  *
- * The real ProcessRunner launches the packaged executable, which only exists on Windows
- * after a build. This mock is injected into CloudScraper during unit tests so the whole
- * CFML path (building the request file, reading the response file, decoding the body,
- * mapping headers and cookies, cleaning up, error handling) can be exercised on any
- * engine and operating system without the real binary.
+ * The real ProcessRunner starts the packaged executable. That file may not be available on the
+ * current operating system or before a build. Tests inject this mock into CloudScraper so they
+ * can cover request files, response files, body decoding, headers, cookies, cleanup, and error
+ * handling without starting the real executable.
  *
- * It records the request that CloudScraper wrote, and writes a canned response file, so
- * tests can assert on both what was sent and what comes back. Set "behavior" to make it
- * simulate a timeout, a missing response file, a non-zero exit, or malformed output.
+ * The mock saves the request written by CloudScraper and writes a fixed response file. Tests can
+ * then check both sides of the exchange. Set behavior to simulate a timeout, missing response
+ * file, nonzero exit code, or invalid response data.
  */
 component accessors="true" {
 
-	property name="behavior"; // normal | timeout | noFile | errorResponse | malformed
-	property name="response"; // struct written as the response for "normal"
-	property name="lastRequest"; // the request struct CloudScraper wrote
-	property name="lastCommand"; // the command array CloudScraper passed
+	property name="behavior"; // Valid values: normal, timeout, noFile, errorResponse, or malformed.
+	property name="response"; // Response struct written when behavior is normal.
+	property name="lastRequest"; // Most recent request struct written by CloudScraper.
+	property name="lastCommand"; // Most recent command array created by CloudScraper.
 
 	function init(){
 		variables.behavior    = "normal";
@@ -27,8 +26,8 @@ component accessors="true" {
 	}
 
 	/**
-	 * Mimic ProcessRunner.run: record the request, write a canned response, and return a
-	 * result struct with the same shape the real runner returns.
+	 * Match ProcessRunner.run(). Save the request, write a fixed response, and return the same
+	 * result fields as the real runner.
 	 */
 	struct function run(
 		required array command,
@@ -39,7 +38,7 @@ component accessors="true" {
 	){
 		variables.lastCommand = arguments.command;
 
-		// command layout: [ binaryPath, "--request", reqPath, "--response", resPath ]
+		// The command contains: binaryPath, --request, request path, --response, response path.
 		var reqPath = arguments.command[ 3 ];
 		var resPath = arguments.command[ 5 ];
 
@@ -55,7 +54,7 @@ component accessors="true" {
 					"logPath"  : arguments.logPath
 				};
 			case "noFile":
-				// Return a non-zero exit and deliberately do not write the response file.
+				// Return a nonzero exit code without creating a response file.
 				return {
 					"exitCode" : 1,
 					"timedOut" : false,
@@ -92,7 +91,7 @@ component accessors="true" {
 	}
 
 	/**
-	 * A successful response with a known body, two header lines, and one cookie.
+	 * Return a successful response with a fixed body, two headers, and one cookie.
 	 */
 	private struct function defaultResponse(){
 		return {

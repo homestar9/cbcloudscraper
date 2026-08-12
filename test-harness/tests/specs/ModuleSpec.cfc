@@ -1,5 +1,5 @@
 /**
- * Confirms the cbcloudscraper module loads and its models are wired correctly.
+ * Checks that the module loads and WireBox provides its public models.
  */
 component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
@@ -28,7 +28,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			it( "wires the CloudScraper model with its collaborators", function(){
 				var cs = getInstance( "CloudScraper@cbcloudscraper" );
 				expect( cs ).toBeComponent();
-				// The get/post/send methods make up the public API.
+				// get(), post(), and send() are the main request methods in the public API.
 				expect( cs ).toHaveKey( "get" );
 				expect( cs ).toHaveKey( "post" );
 				expect( cs ).toHaveKey( "send" );

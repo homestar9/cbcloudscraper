@@ -1,20 +1,20 @@
 /**
- * Calculates semantic versions for the bump task.
+ * Calculates semantic version numbers for the bump task.
  *
- * This component does not read or write files. It receives a version string and returns a
- * new version string. Bump.cfc owns the command output and file changes.
+ * This component does not read or write files. It receives a version string and returns the
+ * updated version string. Bump.cfc handles console output and file changes.
  */
 component {
 
 	/**
-	 * Returns the version levels accepted by Bump.cfc.
+	 * Return the version change levels accepted by Bump.cfc.
 	 */
 	string function supportedLevels(){
 		return "major,minor,patch,prerelease,premajor,preminor,prepatch,none";
 	}
 
 	/**
-	 * Splits a semantic version into its named parts.
+	 * Split a semantic version into named parts.
 	 *
 	 * For example, 1.2.3-beta.4+build7 returns major 1, minor 2, patch 3,
 	 * prerelease "beta.4", and build "build7".
@@ -49,10 +49,10 @@ component {
 	}
 
 	/**
-	 * Calculates the next version for one supported bump level.
+	 * Calculate the next version for one supported change level.
 	 *
-	 * A normal bump finishes a matching prerelease. For example, a patch bump changes
-	 * 1.2.3-beta.2 to 1.2.3. A prerelease bump changes beta.2 to beta.3.
+	 * A normal version change finishes a matching prerelease. For example, a patch change turns
+	 * 1.2.3-beta.2 into 1.2.3. A prerelease change turns beta.2 into beta.3.
 	 *
 	 * @current The current version.
 	 * @level   A value returned by supportedLevels().
@@ -99,7 +99,7 @@ component {
 	}
 
 	/**
-	 * Increases the number at the end of a prerelease label.
+	 * Increase the number at the end of a prerelease label.
 	 */
 	private string function incrementPrerelease( required struct parsedVersion, string preid = "" ){
 		var coreVersion = "#arguments.parsedVersion.major#.#arguments.parsedVersion.minor#.#arguments.parsedVersion.patch#";

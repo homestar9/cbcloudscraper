@@ -1,17 +1,17 @@
 /**
- * Checks, builds, and publishes one project release.
+ * Checks, builds, and publishes a project release.
  *
  * Run `box run-script release` from the project root. The task checks the repository first.
  * It then syncs the production branch, builds the package, publishes to ForgeBox when enabled,
  * creates a Git tag, and creates a GitHub Release when enabled.
  *
- * The order protects the release. Every safe check runs before the first permanent publish.
- * If a later step fails, the task prints the commands needed to finish the same release.
+ * All checks run before the first permanent publishing step. If a later step fails, the task
+ * prints the commands needed to finish the same release.
  * Use `release:dryrun` to build and check without publishing, tagging, or pushing.
  */
 component {
 
-	/** Loads shared settings and the changelog parser. */
+	/** Load shared settings and the changelog parser. */
 	function init(){
 		variables.config           = new BuildConfig( getDirectoryFromPath( getCurrentTemplatePath() ) );
 		variables.settings         = variables.config.getSettings();
@@ -20,11 +20,11 @@ component {
 	}
 
 	/**
-	 * Runs the complete release workflow in its required order.
+	 * Run the complete release workflow in the required order.
 	 *
 	 * @version     The version to release. Defaults to the box.json version.
-	 * @dryRun      Do everything except publish, tag, and push. Prints what it would have run.
-	 *              Use this for your first release, or to test a change to the build.
+	 * @dryRun      Run checks and build files without publishing, tagging, or pushing. Print each
+	 *              command that would run.
 	 * @skipTests   Skip the test suite. Use only when the current version has already been tested.
 	 * @existingTag Publish a tag that already exists and points at HEAD. Used by tag-triggered CI.
 	 * @buildID      Optional build identifier passed through to Build.cfc. CI uses its run number.
@@ -47,15 +47,15 @@ component {
 				.toConsole();
 		}
 
-		// 1. Checks. These run first so nothing permanent has happened if one fails.
+		// Run all checks before making any permanent remote changes.
 		preflight(
 			version     = releaseVersion,
 			dryRun     = arguments.dryRun,
 			existingTag = arguments.existingTag
 		);
 
-		// 2. Line up a branch-based release with the remote. A dry run changes nothing, and a
-		//    tag-triggered release must build the immutable commit that is already checked out.
+		// Fast-forward a branch-based release to its remote branch. A dry run changes nothing.
+		// A tag-based release must build the exact commit that is already checked out.
 		if ( variables.settings.gitSync && !arguments.dryRun && !arguments.existingTag ) {
 			syncWithRemote();
 		} else if ( arguments.existingTag ) {
@@ -64,17 +64,17 @@ component {
 			print.yellowLine( "Dry run: skipping git pull." ).toConsole();
 		}
 
-		// 3. Build. The suite runs here and stops the release if anything fails.
+		// Build the package and stop the release if the test suite or package checks fail.
 		runBuild( releaseVersion, arguments.skipTests, arguments.buildID );
 
-		// 4. Publish to ForgeBox, from the built folder rather than the project root.
+		// Publish the checked build directory to ForgeBox when that target is enabled.
 		if ( variables.settings.publish.forgebox ) {
 			publishToForgebox( releaseVersion, arguments.dryRun );
 		} else {
 			print.line().yellowLine( "Skipping ForgeBox (publish.forgebox is false in build.json)." ).toConsole();
 		}
 
-		// 5. Tag and create the GitHub Release.
+		// Create and push the tag, then create the GitHub Release.
 		if ( variables.settings.publish.github ) {
 			github(
 				version     = releaseVersion,
@@ -97,10 +97,10 @@ component {
 	}
 
 	/**
-	 * Runs every check that must pass before the release can change remote systems.
+	 * Run every check that must pass before the release changes a remote system.
 	 *
 	 * @version     The version being released.
-	 * @dryRun      Soften the checks that only matter for a real release.
+	 * @dryRun      Skip checks that only matter when remote systems will change.
 	 * @existingTag Require the expected tag at HEAD instead of requiring an untagged release branch.
 	 */
 	function preflight( string version = "", boolean dryRun = false, boolean existingTag = false ){
@@ -119,7 +119,7 @@ component {
 		printPreflightSummary( branchName, releaseVersion, tagName, arguments.dryRun, arguments.existingTag );
 	}
 
-	// PREFLIGHT CHECKS
+	// Checks before publishing
 
 	private struct function checkRepository(){
 		var status = variables.config.execNative( "git", [ "status", "--porcelain" ] );
@@ -262,10 +262,10 @@ component {
 	}
 
 	/**
-	 * Tags the release, pushes it, and creates the GitHub Release with the changelog notes and
-	 * the built zip attached.
+	 * Tag the release, push the tag, and create a GitHub Release. Use the changelog section as the
+	 * release notes and attach the built ZIP.
 	 *
-	 * Run on its own to finish a release that stopped after publishing.
+	 * Call this method by itself to finish a release that stopped after ForgeBox publishing.
 	 *
 	 * @version     The version being released.
 	 * @notesOnly   Print the release notes and stop. Nothing is tagged or pushed.
@@ -299,7 +299,7 @@ component {
 		return publishGitHubRelease( tagName, ghArgs, arguments.existingTag );
 	}
 
-	// GITHUB RELEASE STEPS
+	// GitHub Release steps
 
 	private array function buildGitHubArguments(
 		required string releaseVersion,
@@ -314,7 +314,7 @@ component {
 			return error( "No built zip at #zipPath#. Build it first: box run-script build:package" );
 		}
 
-		// The GitHub CLI reads the notes from a file so their Markdown stays unchanged.
+		// Give the notes to the GitHub CLI as a file so their Markdown formatting stays unchanged.
 		var notesFile = variables.config.repoPath( "#variables.settings.stagingDir#/release-notes.md" );
 		if ( !directoryExists( getDirectoryFromPath( notesFile ) ) ) {
 			directoryCreate( getDirectoryFromPath( notesFile ), true, true );
@@ -398,12 +398,12 @@ component {
 			.toConsole();
 	}
 
-	// OTHER RELEASE HELPERS
+	// Other release helpers
 
 	/**
-	 * Proves an existing lightweight or annotated tag resolves to the checked-out commit. This
-	 * is called by both the full release and the standalone github target, so recovery commands
-	 * cannot accidentally attach artifacts from a different commit.
+	 * Confirm that an existing lightweight or annotated tag points to the checked-out commit.
+	 * The full release and standalone GitHub target both call this method. This prevents either
+	 * path from attaching build files created from a different commit.
 	 *
 	 * @tagName The complete tag name, including its configured prefix.
 	 */
@@ -425,11 +425,11 @@ component {
 	}
 
 	/**
-	 * Runs Build.cfc and stops the release if the build fails.
+	 * Run Build.cfc and stop the release if the build fails.
 	 *
-	 * It starts Build.cfc as its own task rather than creating it directly. CommandBox hands a
-	 * task the helpers it needs, such as command() and print, and a component created the
-	 * ordinary way does not get them.
+	 * Start Build.cfc as a CommandBox task instead of creating the component directly. CommandBox
+	 * gives task instances helpers such as command() and print. A regular component instance would
+	 * not receive those helpers.
 	 *
 	 * @version   The version being built.
 	 * @skipTests Skip the test suite.
@@ -461,9 +461,8 @@ component {
 	}
 
 	/**
-	 * Fast-forwards the checked-out production branch, so the release includes remote work but
-	 * never creates an accidental merge commit during publishing. Preflight has already proved
-	 * this is the configured branch and nothing is uncommitted.
+	 * Fast-forward the checked-out production branch to include remote commits without creating a
+	 * merge commit. Earlier checks already confirmed the branch name and clean working tree.
 	 */
 	private function syncWithRemote(){
 		print.line().boldBlueLine( "=== Lining up with the remote ===" ).toConsole();
@@ -485,11 +484,11 @@ component {
 	}
 
 	/**
-	 * Publishes from the built folder rather than the project root.
+	 * Publish the checked build directory instead of the project root.
 	 *
-	 * This matters. Publishing from the project root packages using .gitignore, and one broad
-	 * ignore rule can quietly drop source folders from what people install. Publishing the
-	 * folder the build produced sends exactly what the build checked.
+	 * Publishing from the project root uses .gitignore rules. A broad ignore rule could remove
+	 * required source directories. Publishing the build directory sends the exact files that the
+	 * build already checked.
 	 *
 	 * @version The version being published.
 	 * @dryRun  Print what would run without doing it.
@@ -514,8 +513,7 @@ component {
 
 		print.line().boldBlueLine( "=== Publishing to ForgeBox ===" ).toConsole();
 
-		// Remember where we were, so a failed publish cannot leave the shell inside the
-		// staging folder.
+		// Save the current directory so a failed publish cannot leave CommandBox in the staging directory.
 		var originalDir = shell.pwd();
 		try {
 			command( "cd" ).params( publishDir ).run();
@@ -531,8 +529,9 @@ component {
 	}
 
 	/**
-	 * Stops the release after the package may already be published, printing the exact commands
-	 * that finish the job. Running the release again would refuse, because the version is out.
+	 * Stop after a failure that may happen after publishing. Print the exact commands needed to
+	 * finish the release. Starting the full release again would fail because the version may
+	 * already be published.
 	 *
 	 * @reason  What failed.
 	 * @tagName The tag for this release.
@@ -551,12 +550,10 @@ component {
 	}
 
 	/**
-	 * Stops the task, printing guidance that spans several lines.
+	 * Print several lines of help, then stop the task with one error line.
 	 *
-	 * CommandBox's error() removes line breaks from its message, so anything longer than a
-	 * sentence arrives as one run-together block. The guidance is printed first, where it keeps
-	 * its shape, and error() is left with the single line that says what went wrong. That is
-	 * also why the guidance appears above the error rather than below it: error() ends the task.
+	 * CommandBox removes line breaks from error() messages. Print the detailed help first so its
+	 * line breaks remain readable. Then pass only the summary to error(), which ends the task.
 	 *
 	 * @summary One line saying what went wrong.
 	 * @detail  Lines of guidance to print first.
@@ -573,7 +570,7 @@ component {
 		return error( arguments.summary );
 	}
 
-	/** Reads one version's release notes from the configured changelog. */
+	/** Read one version's release notes from the configured changelog. */
 	private string function extractChangelogSection( required string version ){
 		var changelogPath = variables.config.repoPath( variables.settings.changelog );
 		if ( !fileExists( changelogPath ) ) {
@@ -592,8 +589,8 @@ component {
 	}
 
 	/**
-	 * A version with a hyphen, such as 1.0.0-beta.4, is a pre-release, so the GitHub Release
-	 * is marked as one.
+	 * Return true for a prerelease version such as 1.0.0-beta.4. GitHub uses this value to mark
+	 * the release as a prerelease.
 	 *
 	 * @version The version being released.
 	 */

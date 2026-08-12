@@ -1,12 +1,18 @@
 """Secondary engine: cloudscraper.
 
-cloudscraper solves Cloudflare's legacy JavaScript challenge (the "Checking your
-browser before you access" interstitial). It runs after curl_cffi in "auto" mode,
-as a fallback for sites that answer with that specific challenge.
+cloudscraper solves Cloudflare's JavaScript challenge (the "Checking your browser
+before you access" interstitial). It runs after curl_cffi in "auto" mode, as a
+fallback for sites that answer with that specific challenge.
+
+The imported package is cloudscraper25, the maintained fork of the original
+cloudscraper. We alias it to `cloudscraper` so the rest of this module and the public
+engine name stay unchanged. The public engine identifier remains "cloudscraper"
+(see NAME below), which keeps the CFML config, docs, and result `engineUsed` value
+stable regardless of the pip package name.
 """
 import base64
 
-import cloudscraper
+import cloudscraper25 as cloudscraper
 
 from .common import cookiejar_to_list, detect_charset, headers_to_list
 

@@ -1,345 +1,241 @@
-# Releasing this project
+# Release cbcloudscraper
 
-The routine, start to finish. Settings live in [build/build.json](build/build.json); the
-commands below come from the build kit in [build/](build/).
+Use this guide to publish the CFML module and its Windows helper program as one release.
+
+A release is incomplete until both parts are available. The module downloads the Windows helper
+from the matching GitHub Release, so publishing only the ForgeBox package will break automatic
+installation.
+
+## What a complete release publishes
+
+| File or package | Destination | Command that creates it |
+| --- | --- | --- |
+| Pure CFML module package | ForgeBox and the GitHub Release | The release kit called by `build\release.ps1` |
+| `cbcloudscraper-win64.zip` | GitHub Release asset | `build\release.ps1` |
+| `cbcloudscraper-win64.zip.sha256` | GitHub Release asset | `build\release.ps1` |
+
+The PowerShell release script builds and publishes all three items.
 
 ## One-time setup
 
-- **CommandBox** installed (`box version`).
-- **GitHub CLI** signed in, if you publish GitHub Releases: `gh auth login`.
-- **ForgeBox** signed in, if you publish there: `box forgebox login`.
-- A test server you can start, unless `runTests` is off in build.json.
-- `branch` in build/build.json set to the production branch you publish from, normally `main`
-  or `master`. In Gitflow this is never `develop` or `release/*`.
+Install and configure these tools on Windows:
 
-Check all of it at once:
+- Python 3.11 for building the helper program. Check it with `py -3.11 --version`.
+- CommandBox. Check it with `box version`.
+- GitHub CLI. Sign in with `gh auth login`.
+- ForgeBox access. Sign in with `box forgebox login`.
+- GitKraken for the Gitflow steps used by this project.
 
-```
+Gitflow is the branch workflow used for releases after `v1.0.0`. Work starts on `develop`, moves
+to a release branch, and then merges into both `master` and `develop`.
+
+In GitKraken, open **Preferences > Gitflow** and set the version tag prefix to `v`. The release
+kit also uses `v` as its tag prefix.
+
+Run the project setup check at any time:
+
+```bash
 box run-script release:check
 ```
 
-## The routine
+Run releases from a clean Git working tree. The release kit stops when tracked or untracked
+files have not been committed or stashed.
 
-### 1. Write your notes as you work
+## Check whether the helper needs a rebuild
 
-Put changes under `## [Unreleased]` in the changelog. Write them for the people who use the
-project, because this text becomes the release notes.
+Rebuild the Windows helper when any of these conditions is true:
 
-### 2. Test on every engine
+- A file under `engine/` changed.
+- `build/cbcloudscraper.spec` changed.
+- A newer runtime library should be included.
+- A target site stopped working and you want to test newer browser fingerprints or challenge
+  handling.
 
-```
-box run-script test:engines
-```
+Run the update check:
 
-Runs the whole suite on each engine in turn. A failed engine does not prevent the remaining
-engines from running. The final command still fails when any engine failed. This check can take
-a while, so it stays separate from the release command. Skip it when the project supports only
-one engine.
-
-### 3. Raise the version
-
-> **Using Gitflow?** Create `release/<version>` from `develop` first, then run the bump on
-> that release branch. Do not bump `develop` before creating the branch. Follow the complete
-> sequence in the [Gitflow cheat sheet](#gitflow-cheat-sheet) below.
-
-```
-box run-script bump:patch     # bug fixes           1.0.0 -> 1.0.1
-box run-script bump:minor     # new features        1.0.0 -> 1.1.0
-box run-script bump:major     # breaking changes    1.0.0 -> 2.0.0
+```powershell
+powershell -ExecutionPolicy Bypass -File build\check-updates.ps1
 ```
 
-This raises the version in box.json and moves your `[Unreleased]` notes into a dated section.
-It does not commit anything.
+The script compares `engine\requirements.lock.txt` with the latest stable package versions on
+PyPI, the Python Package Index. It also checks whether the helper source changed after the latest
+release tag. The script does not install packages or change files.
 
-Add `:dryRun=true` to any of these to see what would change without writing anything.
+The script exits with code `1` when it recommends a rebuild. Use `-Prerelease` when you also
+want to see available prerelease packages:
 
-**Your notes are required.** If `[Unreleased]` is empty, nothing happens at all: no version
-change and no changelog change. The dated section becomes your release notes on GitHub, so an
-empty one would ship a release nobody can interpret. Write a line first, even just
-`- Maintenance release`.
-
-**Releasing 1.0.0 for the first time?** box.json probably already says 1.0.0, and raising it
-would skip that number. Date the notes without changing the version:
-
-```
-box task run taskFile=build/Bump.cfc :level=none
+```powershell
+powershell -ExecutionPolicy Bypass -File build\check-updates.ps1 -Prerelease
 ```
 
-#### Alphas and betas
+`curl_cffi` uses a version range in `engine\requirements.txt`, so a new build may select a newer
+version without a repository change. `cloudscraper25` uses an exact version. Update that exact
+version in `engine\requirements.txt` only when you intend to change it.
 
-Version numbers follow SemVer, where `1.2.0-beta.3` comes **before** `1.2.0`. These commands
-follow the same rule, so finishing a beta lands on the version it was leading up to rather than
-stepping past it.
+## Build and test the Windows helper
 
-```
-box run-script bump:beta          # start one:  1.1.0 -> 1.2.0-beta.1
-box run-script bump:alpha         # the same, labelled alpha
-box run-script bump:prerelease    # step it on: 1.2.0-beta.1 -> 1.2.0-beta.2
-box run-script bump:patch         # finish it:  1.2.0-beta.2 -> 1.2.0
-```
+Build the helper:
 
-`bump:beta` and `bump:alpha` start a prerelease of the next **minor** version. For a prerelease
-of the next patch or major instead, name the level yourself:
-
-```
-box task run taskFile=build/Bump.cfc :level=prepatch     # 1.1.0 -> 1.1.1-beta.1
-box task run taskFile=build/Bump.cfc :level=preminor     # 1.1.0 -> 1.2.0-beta.1
-box task run taskFile=build/Bump.cfc :level=premajor     # 1.1.0 -> 2.0.0-beta.1
+```powershell
+powershell -ExecutionPolicy Bypass -File build\build-binary.ps1
 ```
 
-Starting the next minor prerelease is refused while any prerelease is active. This protects
-`1.2.0-beta.3`, for example, from accidentally becoming `1.3.0-beta.1`. Advance the active
-prerelease with `bump:prerelease`. To retarget it deliberately, add
-`:allowPrereleaseRetarget=true` to a direct `preminor` task call.
+The build creates `bin\win64\cbcloudscraper.exe` and its support files. It also rewrites
+`engine\requirements.lock.txt` with the package versions included in the build.
 
-Add `:preid=rc` to a direct start command to use a different label. To switch the label of an
-active prerelease without changing its core version, use `:level=prerelease` with the new
-`:preid`; switching `1.2.0-alpha.7` to beta produces `1.2.0-beta.1`.
+Review and commit `engine\requirements.lock.txt` when it changes. Add `-Clean` to rebuild the
+Python virtual environment from the beginning:
 
-A prerelease is flagged as one on GitHub automatically, because the version contains a hyphen.
-
-Every level, for reference:
-
-| Level | What it does |
-| --- | --- |
-| `patch`, `minor`, `major` | Raise the version. On a prerelease, settle on the version it was leading up to. |
-| `prerelease` | Step an existing prerelease forward, `beta.3` to `beta.4`. |
-| `prepatch`, `preminor`, `premajor` | Start a prerelease. Uses `:preid=beta` unless you say otherwise. `preminor` refuses to retarget an active prerelease without `:allowPrereleaseRetarget=true`. |
-| `none` | Keep the version and just date the changelog. |
-
-### 4. Check and commit
-
+```powershell
+powershell -ExecutionPolicy Bypass -File build\build-binary.ps1 -Clean
 ```
+
+Run the smoke test after building. The smoke test makes one HTTP request with the built helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build\smoke-test.ps1
+```
+
+You can test a real target by passing its URL:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build\smoke-test.ps1 -Url https://your-target.example.com/
+```
+
+A changed helper needs a new module version and a new release tag. Do not replace the ZIP file
+on an older release. Installed modules record the release tag of their helper, so replacing an
+old asset does not tell those modules to download it again.
+
+## Publish the first release: `v1.0.0`
+
+Use this section only for the first release. The repository currently has version `1.0.0` in
+`box.json` and a dated `1.0.0` section in `CHANGELOG.md`.
+
+Do not run a version bump command. A bump would skip `1.0.0`.
+
+From `master`, commit all release changes and confirm that the working tree is clean. Then run:
+
+```powershell
 git status
-git diff -- box.json CHANGELOG.md
-git add box.json CHANGELOG.md
-git diff --staged
-git commit -m "Release 1.0.1"
-git push origin <current-branch>
+box run-script release:check
+powershell -ExecutionPolicy Bypass -File build\release.ps1
 ```
 
-Replace `CHANGELOG.md`, `1.0.1`, and `<current-branch>` with the values for your project.
+The script performs these actions:
 
-**Using GitKraken or another Git GUI?** Review the changed `box.json` and changelog, stage only
-those release files, review the staged changes, commit them as `Release 1.0.1`, and then push
-the current branch. Those are the GUI equivalents of the commands above.
+1. Builds the Windows helper.
+2. Creates its ZIP file and SHA-256 checksum.
+3. Starts the Lucee 5 test server.
+4. Runs the tests and builds the CFML package.
+5. Publishes the module to ForgeBox.
+6. Creates and pushes tag `v1.0.0`.
+7. Creates the GitHub Release.
+8. Uploads the helper ZIP file and checksum.
 
-- `git status` lists changed and untracked files.
-- `git diff` shows the unstaged version and changelog edits for review.
-- `git add` selects exactly those files for the next commit.
-- `git diff --staged` previews exactly what the commit will contain.
-- `git commit` records that snapshot in your local repository; it does not upload anything.
-- `git push` sends the commit to the named branch on the `origin` remote.
+The Lucee test server may remain running after the release finishes.
 
-Using explicit `git add` is intentional. `git commit -am` skips untracked files, which can make
-a commit look complete when a new release file was left out.
+## Verify what users will install
 
-### 5. Rehearse (recommended the first few times)
+After publishing, test the same download path that the module uses for application servers.
 
-```
-box run-script release:dryrun
-```
+Move your local `bin\win64` directory out of the module or test from a clean copy. Then run:
 
-Runs the checks and the full build, then prints exactly what it would publish, tag, and push.
-Nothing leaves your machine. You can rehearse from a Gitflow `release/*` branch; the command
-warns that the real release must still run from the configured production branch.
-
-### 6. Release
-
-Start a test server first, unless `runTests` is off:
-
-```
-box run-script release
+```bash
+box task run taskFile=tasks/Binary.cfc :action=install
 ```
 
-That runs the checks, lines up with the remote, runs the tests, builds and verifies the
-package, publishes it, tags the version, and creates the GitHub Release.
+The task should download the ZIP file from the new GitHub Release, verify its checksum, extract
+the helper, and write the release tag into the version stamp.
 
-## Gitflow cheat sheet
+Do not remove an uncommitted local build unless you have another copy or can rebuild it.
 
-In Gitflow, `develop` collects features, `release/<version>` prepares a release, and the
-production branch records published releases. A finished release must reach both production
-and `develop`. The build kit's `branch` setting always names production.
+## Turn on Gitflow after `v1.0.0`
 
-The branch order is the important part:
+This is a one-time step after the first release succeeds.
 
-1. Create the release branch from an up-to-date `develop`.
-2. While checked out on the release branch, bump the version and commit the version and
-   changelog changes. **Do not run the bump on `develop` before creating the branch.**
-3. Test and rehearse on the release branch.
-4. Finish the release by merging it into both production and `develop`.
-5. Publish from production, using the command that matches whichever tool created the tag.
+In GitKraken, select **Gitflow > Initialize** and use these values:
 
-See Atlassian's
-[Gitflow workflow guide](https://www.atlassian.com/git/tutorials/comparing-workflows/gitflow-workflow/)
-for the branch model.
+- Production branch: `master`
+- Development branch: `develop`
+- Version tag prefix: `v`
 
-### Plain Git or pull requests
+Push the new `develop` branch to `origin`.
 
-This path lets the build kit create the tag. The example releases `1.2.0`; substitute your
-version and production branch name.
+## Publish later releases with GitKraken
 
-1. Start from an up-to-date `develop` branch:
+Use this process for every release after `v1.0.0`.
 
-   ```
-   git switch develop
-   git pull --ff-only origin develop
-   git switch -c release/1.2.0
-   ```
+1. Work on `develop`. Add user-facing notes under `## [Unreleased]` in `CHANGELOG.md` as changes
+   are made.
+2. Run `build\check-updates.ps1`. Build and smoke-test the helper if the check recommends it or
+   helper code changed. Commit an updated `engine\requirements.lock.txt` with the related work.
+3. In GitKraken, select **Gitflow > Start release**. Name the release with the new version, such
+   as `1.1.0`.
+4. On the new release branch, run the correct bump command:
 
-2. You are now on `release/1.2.0`. Finalize the notes and run the appropriate bump here, not
-   on `develop`:
-
-   ```
-   box run-script bump:minor
-   git diff -- box.json CHANGELOG.md
-   git add box.json CHANGELOG.md
-   git diff --staged
-   git commit -m "Release 1.2.0"
+   ```bash
+   box run-script bump:patch   # bug fixes: 1.0.0 to 1.0.1
+   box run-script bump:minor   # new features: 1.0.0 to 1.1.0
+   box run-script bump:major   # breaking changes: 1.0.0 to 2.0.0
    ```
 
-   Push the preparation branch with:
+5. Review `box.json` and `CHANGELOG.md`. Stage only those two files. Commit them with a message
+   such as `Release 1.1.0`, then push the release branch.
+6. Rehearse the release:
 
-   ```
-   git push -u origin release/1.2.0
-   ```
-
-3. Test and rehearse on the release branch:
-
-   ```
-   box run-script test:engines
+   ```bash
    box run-script release:dryrun
    ```
 
-4. Merge `release/1.2.0` into both the production branch and `develop`. Use pull requests when
-   your repository requires review. Do not delete the release branch until both merges land.
+   The dry run may warn that the current branch is not `master`. That warning is expected on a
+   release branch.
+7. In GitKraken, select **Gitflow > Finish release**. GitKraken merges the release into `master`
+   and `develop`. GitKraken also creates a tag such as `v1.1.0`.
+8. Push `master`, `develop`, and the new tag. Check out `master`.
+9. Publish the existing tag:
 
-5. Check out the updated production branch and publish:
-
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File build\release.ps1 -ExistingTag
    ```
-   git switch main
-   git pull --ff-only origin main
-   box run-script release:check
-   box run-script release
-   ```
 
-6. After the publish succeeds and both merges are present, delete the release branch locally
-   and remotely if your pull-request host did not already do so.
+10. Run the user installation check from the previous section.
 
-A Gitflow hotfix starts from production instead of `develop`, usually bumps the patch version,
-and is also bumped on its `hotfix/<version>` branch before being merged into production and
-`develop`.
+`-ExistingTag` is required because GitKraken already created the release tag. Without this
+switch, the release kit tries to create the same tag and stops. The existing tag must point to
+the current `master` commit.
 
-### Using GitKraken
+A hotfix follows the same process, but it starts from `master` instead of `develop`. A hotfix
+normally uses `bump:patch`. Finish the hotfix into both `master` and `develop` before publishing.
 
-GitKraken's **Finish release** action merges the release into production and `develop` and
-always creates a tag. It does not offer the command-line extension's no-tag finish option.
-Configure the version-tag prefix under **Preferences > Gitflow** to match `tagPrefix` in
-build/build.json; the usual value is `v`. See GitKraken's
-[Gitflow documentation](https://help.gitkraken.com/gitkraken-desktop/git-flow/).
+## Troubleshooting
 
-1. Create `release/1.2.0` from `develop` in GitKraken.
-2. On `release/1.2.0`, run `box run-script bump:minor`, review the files, and commit them.
-3. Test and run `box run-script release:dryrun` on the release branch.
-4. Use **Finish release**. GitKraken merges both branches and creates `v1.2.0`.
-5. Push production, `develop`, and `v1.2.0`, then check out the updated production branch.
-6. Choose one publisher:
-   - If the tag push triggers the supplied GitHub Actions workflow, let that workflow publish.
-   - To publish locally, run `box run-script release:existing-tag`.
-
-`release:existing-tag` runs the normal checks, tests, package build, ForgeBox publish, and
-GitHub Release creation, but it does not create, move, or push the tag. It refuses unless the
-expected tag points exactly at the checked-out production commit. Do not run the ordinary
-`box run-script release` after GitKraken finishes; that command owns tag creation and therefore
-rejects an existing tag.
-
-### Using the `git-flow` extension
-
-The commands below use the extension's
-[documented release `finish` behavior](https://github.com/nvie/gitflow/blob/develop/git-flow-release)
-and its `-n` no-tag option.
-
-Set its version-tag prefix to the build kit's `tagPrefix` once. The default here is `v`:
-
-```
-git config gitflow.prefix.versiontag v
-```
-
-Choose exactly one of these finish paths so only one tool owns the tag:
-
-- **Publish locally with the build kit:** run `git flow release finish -n 1.2.0` so Gitflow
-  performs both merges without tagging. Push production and `develop`, switch to production,
-  then run `box run-script release`; the build kit creates and pushes `v1.2.0`.
-- **Let Gitflow create the tag:** run the normal `git flow release finish 1.2.0`, then push
-  production, `develop`, and `v1.2.0`. Either let the tag-triggered GitHub Actions workflow
-  publish it or switch to production and run `box run-script release:existing-tag` locally.
-
-Never run the normal tagging form of `git flow release finish` and then run the ordinary
-`box run-script release` command. Both would try to own the same tag, and the ordinary command
-correctly refuses.
-
-### If the release tag already exists before Finish
-
-First find out whether the tag is only local or has already been shared:
-
-```
-git fetch --tags origin
-git show --no-patch --decorate v1.2.0
-git ls-remote --tags origin refs/tags/v1.2.0
-```
-
-- If both finish merges already landed and `v1.2.0` points at production `HEAD`, do not Finish
-  again. Push any unpushed branches and tag, then use `release:existing-tag` or the tag workflow.
-- If the required merges have not landed, merge the release into production and `develop`
-  manually or through pull requests so no tool tries to recreate the tag. The tag must resolve
-  to the final production `HEAD` before `release:existing-tag` will publish it.
-- If the tag is an accidental, local-only tag that has never been published or consumed,
-  delete that local tag and then let GitKraken Finish. In GitKraken, right-click the tag and
-  choose **Delete locally**; at the command line use `git tag -d v1.2.0`.
-- If the tag is on the remote, has already been published, or points at a different commit,
-  do not silently delete or move it. The version may already be claimed. Verify the release
-  history and either choose a new version or coordinate an intentional repair.
-
-## Already tested and deliberately skipping the release test run?
-
-```
-box run-script release:skip-tests
-```
-
-Same as `release`, but skips the test suite and says so loudly. The older
-`box run-script release:hotfix` name remains as an alias. Neither command creates, merges, or
-finishes a Gitflow hotfix branch.
-
-## If something fails partway
-
-Everything that can stop a release happens **before** anything is published. If a step fails
-**after** publishing, do not run the release again: the version is already out, so the checks
-will refuse. The failure message prints the exact commands to finish by hand.
-
-To finish the tag and GitHub Release when the tag was not created yet:
-
-```
-box task run taskFile=build/Release.cfc target=github :version=1.0.1
-```
-
-If the failure message says the tag was already pushed, publish that existing tag instead:
-
-```
-box task run taskFile=build/Release.cfc target=github :version=1.0.1 :existingTag=true
-```
-
-## Common problems
-
-| Message | What it means |
+| Problem | What to do |
 | --- | --- |
-| `You have uncommitted changes` | Commit or stash first. The release refuses so the forced checkout cannot throw work away. |
-| `No answer from the test server` | Start your server, or set `runTests` to false in build.json. |
-| `Could not find the GitHub CLI` | Install it, then **open a new terminal**. A terminal keeps the PATH it started with. |
-| `Permission denied (publickey)` | git cannot sign in to your remote. Add your SSH key on GitHub, or switch the remote to HTTPS. |
-| `has no "## [1.0.1]" section` | Run a `bump:` command to move your notes into a dated section. |
-| `The "## [Unreleased]" section is empty` | Write your release notes first. Nothing was changed. |
-| `is not a prerelease, so there is nothing to step forward` | Use `bump:beta` to start one, not `bump:prerelease`. |
-| `is already a prerelease, so preminor was stopped` | Use `bump:prerelease`, or add `:allowPrereleaseRetarget=true` when retargeting is deliberate. |
-| `Tag v1.0.1 already exists` | That version is already released. Raise the version. |
-| `Tag v1.0.1 already exists on origin` | Fetch tags and choose a version that has not already been published. |
-| `Tag v1.0.1 does not point at the checked-out commit` | A tag-triggered build checked out the wrong source. Check the workflow ref and version. |
+| The helper is already built and has not changed. | Add `-SkipBinaryBuild` to `build\release.ps1`. The script still creates and uploads a fresh ZIP and checksum. |
+| The release kit finished, but the helper upload failed. | Upload the two assets with the recovery command below. |
+| ForgeBox published, but the tag or GitHub Release was not created. | Run the matching `build/Release.cfc` recovery command below. Do not run the full release again. |
+| The command reports `Tag v1.1.0 already exists`. | Use `-ExistingTag` if GitKraken created the tag and it points to the current commit. Otherwise, check whether the version was already released. |
+| The command reports uncommitted changes. | Review and commit or stash them. The release will not publish from a dirty working tree. |
+| The tests report no answer from the server. | Start it with `box run-script start:lucee`. |
+| The binary build changed `engine/requirements.lock.txt`. | Review and commit the lock file, then run the release again from a clean working tree. |
+
+If only the helper upload failed, replace `v1.1.0` with the release tag and run:
+
+```powershell
+gh release upload v1.1.0 .artifacts\binary\cbcloudscraper-win64.zip .artifacts\binary\cbcloudscraper-win64.zip.sha256 --clobber
+```
+
+If ForgeBox published but no tag or GitHub Release exists, run:
+
+```bash
+box task run taskFile=build/Release.cfc target=github :version=1.1.0
+```
+
+If the tag already exists and points to the release commit, add `:existingTag=true`:
+
+```bash
+box task run taskFile=build/Release.cfc target=github :version=1.1.0 :existingTag=true
+```
+
+Do not rerun the complete release after ForgeBox has published the version. ForgeBox will reject
+the duplicate version, and the release may already be partly available to users.

@@ -1,12 +1,12 @@
 /**
- * Calculates project settings used by BuildConfig.cfc and Install.cfc.
+ * Builds project settings for BuildConfig.cfc and Install.cfc.
  *
- * This component does not read or write files. Callers provide parsed JSON and filenames.
+ * This component does not read or write files. Callers pass parsed JSON and filenames to it.
  */
 component {
 
 	/**
-	 * Returns "module" for installable CommandBox package types. Returns "app" otherwise.
+	 * Return "module" for CommandBox package types that can be installed. Return "app" for all others.
 	 */
 	string function detectProjectType( required struct packageData ){
 		var packageType = lCase( arguments.packageData.type ?: "" );
@@ -15,7 +15,7 @@ component {
 	}
 
 	/**
-	 * Returns the first test runner URL from box.json or the standard local fallback.
+	 * Return the first test runner URL from box.json. Use the standard local URL when none is set.
 	 */
 	string function detectTestRunner( required struct packageData ){
 		var configuredRunner = arguments.packageData.testbox.runner ?: "";
@@ -37,7 +37,7 @@ component {
 	}
 
 	/**
-	 * Returns BuildConfig.cfc's default package exclusions.
+	 * Return the files and directories that BuildConfig.cfc excludes by default.
 	 */
 	array function buildConfigDefaultExcludes(){
 		return [
@@ -58,7 +58,7 @@ component {
 	}
 
 	/**
-	 * Returns the exclusions that Install.cfc writes for a new project.
+	 * Return the default exclusions that Install.cfc writes for a new project.
 	 */
 	array function installerDefaultExcludes( required string projectType ){
 		if ( arguments.projectType == "module" ) {
@@ -103,7 +103,7 @@ component {
 	}
 
 	/**
-	 * Chooses a display name for one CommandBox server configuration.
+	 * Choose a display name for one CommandBox server configuration.
 	 */
 	string function engineName( required string fileName, struct serverSettings = {} ){
 		if (
@@ -130,7 +130,7 @@ component {
 	}
 
 	/**
-	 * Converts an engine ID or filename stem into a readable display name.
+	 * Convert an engine ID or filename without its extension into a readable display name.
 	 */
 	string function readableEngineName( required string value ){
 		var readableName = reReplaceNoCase( arguments.value, "[-_]cfml\b", "" );

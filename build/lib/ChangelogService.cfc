@@ -1,13 +1,13 @@
 /**
- * Reads and changes changelog text for the bump and release tasks.
+ * Reads and updates changelog text for the bump and release tasks.
  *
- * This component works with strings only. The task components check file paths and write the
- * returned text. Keeping file access outside this component makes every text rule easy to test.
+ * This component only works with strings. The task components read and write the files.
+ * Keeping file access in the tasks makes these text rules easier to test.
  */
 component {
 
 	/**
-	 * Moves the [Unreleased] notes into a dated version section.
+	 * Move the [Unreleased] notes into a dated section for the new version.
 	 *
 	 * The returned text uses the same line endings as the input text.
 	 *
@@ -62,7 +62,7 @@ component {
 	}
 
 	/**
-	 * Returns the notes inside one dated version section.
+	 * Return the notes from one dated version section.
 	 *
 	 * @content       The complete changelog text.
 	 * @version       The version whose notes are needed.

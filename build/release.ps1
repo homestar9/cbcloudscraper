@@ -59,15 +59,9 @@ if (-not $SkipBinaryBuild) {
 }
 if (-not (Test-Path $Exe)) { throw "Binary not found at $Exe. Run without -SkipBinaryBuild." }
 
-# ── 2. Zip the binary folder and write its SHA-256 ────────────────────────────
-if (Test-Path $ArtifactDir) { Remove-Item -Recurse -Force $ArtifactDir }
-New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
-$Zip = Join-Path $ArtifactDir "cbcloudscraper-win64.zip"
-Compress-Archive -Path (Join-Path $BinDir "*") -DestinationPath $Zip -Force
-$Hash = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLower()
-[System.IO.File]::WriteAllText("$Zip.sha256", "$Hash  cbcloudscraper-win64.zip`n", (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "Binary asset ready: $Zip" -ForegroundColor Green
-Write-Host "SHA-256: $Hash"
+# The binary zip is built later (step 4), after the release kit runs. The kit rewrites the
+# .artifacts directory, so a zip written here (under .artifacts\binary) would be deleted before
+# the upload step. Building it after the kit keeps the file in place for the upload.
 
 # The version and tag the kit will release (read from box.json, the single source of truth).
 $Version = (Get-Content (Join-Path $RepoRoot "box.json") -Raw | ConvertFrom-Json).version
@@ -75,11 +69,11 @@ $Tag     = "v$Version"
 
 Push-Location $RepoRoot
 try {
-    # ── 3. Start the test server the kit uses to run the suite during release ──
+    # ── 2. Start the test server the kit uses to run the suite during release ──
     Write-Host "Starting the Lucee test server..." -ForegroundColor Cyan
     box server start serverConfigFile=server-lucee@5.json --noSaveSettings | Out-Null
 
-    # ── 4. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
+    # ── 3. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
     # release:existing-tag skips tag creation and the branch push, because the tag is already
     # made and pushed. Everything else about the two paths is the same.
     $ReleaseScript = if ($ExistingTag) { "release:existing-tag" } else { "release" }
@@ -91,8 +85,21 @@ try {
     box run-script $ReleaseScript
     if ($LASTEXITCODE -ne 0) { throw "The release kit (box run-script $ReleaseScript) failed." }
 
+    # ── 4. Zip the binary folder and write its SHA-256 ────────────────────────
+    # Built here, after the kit runs, because the kit rewrites the .artifacts directory and would
+    # otherwise delete this zip before it is uploaded.
+    if (Test-Path $ArtifactDir) { Remove-Item -Recurse -Force $ArtifactDir }
+    New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
+    $Zip = Join-Path $ArtifactDir "cbcloudscraper-win64.zip"
+    Compress-Archive -Path (Join-Path $BinDir "*") -DestinationPath $Zip -Force
+    $Hash = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLower()
+    [System.IO.File]::WriteAllText("$Zip.sha256", "$Hash  cbcloudscraper-win64.zip`n", (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Binary asset ready: $Zip" -ForegroundColor Green
+    Write-Host "SHA-256: $Hash"
+
     # ── 5. Attach the binary to the Release the kit just created ──────────────
     Write-Host "Attaching the binary to Release $Tag..." -ForegroundColor Cyan
+    if (-not (Test-Path $Zip)) { throw "Binary asset $Zip is missing; cannot upload it to Release $Tag." }
     gh release upload $Tag $Zip "$Zip.sha256" --clobber
     if ($LASTEXITCODE -ne 0) { throw "Uploading the binary asset to Release $Tag failed." }
 

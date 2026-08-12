@@ -32,3 +32,6 @@ engine/dist/**
 **/__pycache__/**
 build/.pyi-work/**
 build/.pyi-dist/**
+
+# Local plans
+plans/**

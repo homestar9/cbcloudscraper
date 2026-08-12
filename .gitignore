@@ -2,6 +2,7 @@
 .artifacts/**
 .tmp/**
 .DS_Store
+.vscode/**
 
 # Engine + Secrets
 .env

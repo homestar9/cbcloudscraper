@@ -33,11 +33,12 @@ component {
 		fileSystemUtil.createMapping( "cbcloudscraperKit", moduleRoot );
 		var downloader = new cbcloudscraperKit.models.BinaryDownloader();
 
-		var baseDir    = len( trim( arguments.directory ) ) ? arguments.directory : ( moduleRoot & "/bin" );
-		var releaseTag = downloader.resolveTag( moduleRoot, arguments.tag );
-		var url        = downloader.deriveBaseURL( moduleRoot, arguments.baseURL );
+		var baseDir        = len( trim( arguments.directory ) ) ? arguments.directory : ( moduleRoot & "/bin" );
+		var releaseTag     = downloader.resolveTag( moduleRoot, arguments.tag );
+		// Not named "url" because Lucee resolves that identifier to the URL scope, not the local variable.
+		var releaseBaseURL = downloader.deriveBaseURL( moduleRoot, arguments.baseURL );
 
-		var log = function( message ){
+		var onProgress = function( message ){
 			print.line( message ).toConsole();
 		};
 
@@ -50,10 +51,10 @@ component {
 				var installed = downloader.ensure(
 					baseDir        = baseDir,
 					tag            = releaseTag,
-					baseURL        = url,
+					baseURL        = releaseBaseURL,
 					verifyChecksum = arguments.verify,
 					force          = true,
-					log            = log
+					onProgress     = onProgress
 				);
 				print.greenLine( "Done (" & installed.action & "): " & installed.path ).toConsole();
 				break;
@@ -71,10 +72,10 @@ component {
 						var updated = downloader.ensure(
 							baseDir        = baseDir,
 							tag            = releaseTag,
-							baseURL        = url,
+							baseURL        = releaseBaseURL,
 							verifyChecksum = arguments.verify,
 							force          = true,
-							log            = log
+							onProgress     = onProgress
 						);
 						print.greenLine( "Done (" & updated.action & "): " & updated.path ).toConsole();
 					} else {

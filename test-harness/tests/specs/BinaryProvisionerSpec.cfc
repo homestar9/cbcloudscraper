@@ -20,10 +20,16 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 		var localBinary    = expandPath( "/cbcloudscraper/bin/win64/cbcloudscraper.exe" );
 		var hasLocalBinary = fileExists( localBinary );
 
+		// Create a directory and its parents. directoryCreate() with extra arguments
+		// does not compile on Adobe ColdFusion, so use java.io.File.mkdirs() here.
+		var makeDirs = function( required string path ){
+			createObject( "java", "java.io.File" ).init( arguments.path ).mkdirs();
+		};
+
 		// Create a fake Windows executable and optional version tag in a test directory.
 		var stageBinary = function( required string baseDir, string tag = "" ){
 			var platformDir = arguments.baseDir & "/win64";
-			directoryCreate( platformDir, true, true );
+			makeDirs( platformDir );
 			fileWrite( platformDir & "/cbcloudscraper.exe", "not a real binary" );
 			if ( len( arguments.tag ) ) {
 				fileWrite( platformDir & "/.cbcloudscraper-version", arguments.tag );
@@ -74,7 +80,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
 			it( "throws when auto-download is off and no binary is present", function(){
 				var emptyDir = getTempDirectory() & "cbcs-empty-" & createUUID();
-				directoryCreate( emptyDir, true, true );
+				makeDirs( emptyDir );
 				try {
 					settings.binaryPath         = "";
 					settings.binaryDirectory    = emptyDir;

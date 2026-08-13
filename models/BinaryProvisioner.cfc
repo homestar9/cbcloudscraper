@@ -47,7 +47,9 @@ component singleton accessors="true" {
 		}
 
 		// The cached executable is missing or outdated. Download it or report why that is disabled.
-		if ( !( settings.autoDownloadBinary ?: true ) ) {
+		// structKeyExists is used instead of ?: because Adobe ColdFusion's ?: treats a boolean
+		// false value like a missing value and would replace it with true.
+		if ( !( structKeyExists( settings, "autoDownloadBinary" ) ? settings.autoDownloadBinary : true ) ) {
 			throw(
 				type    = "cbcloudscraper.BinaryUnavailable",
 				message = missingMessage( baseDir, tag ),
@@ -66,9 +68,9 @@ component singleton accessors="true" {
 				baseDir        = baseDir,
 				tag            = tag,
 				baseURL        = getBaseURL(),
-				verifyChecksum = ( settings.verifyChecksum ?: true ),
+				verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 				force          = false,
-				log            = logCallback()
+				onProgress     = logCallback()
 			);
 		}
 
@@ -88,9 +90,9 @@ component singleton accessors="true" {
 			baseDir        = getBinaryDirectory(),
 			tag            = getReleaseTag(),
 			baseURL        = getBaseURL(),
-			verifyChecksum = ( settings.verifyChecksum ?: true ),
+			verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 			force          = arguments.force,
-			log            = logCallback()
+			onProgress     = logCallback()
 		);
 	}
 

@@ -210,16 +210,21 @@ component singleton accessors="true" {
 	 * that another request is still using. Set olderThanMinutes higher than the longest time that
 	 * one request can remain active.
 	 *
-	 * @olderThanMinutes Files older than this many minutes are removed.
+	 * @olderThanMinutes Files older than this many minutes are removed. Omit to use the tempSweepMinutes setting.
 	 *
 	 * @return The number of temporary files removed.
 	 */
-	numeric function sweepTempFiles( numeric olderThanMinutes = ( settings.tempSweepMinutes ?: 30 ) ){
+	numeric function sweepTempFiles( numeric olderThanMinutes ){
+		// The default is resolved inside the body because Adobe ColdFusion cannot compile a
+		// dynamic expression as an argument default value.
+		var maxAgeMinutes = structKeyExists( arguments, "olderThanMinutes" )
+		 ? arguments.olderThanMinutes
+		 : ( settings.tempSweepMinutes ?: 30 );
 		var dir = settings.workingDirectory;
 		if ( !len( dir ) || !directoryExists( dir ) ) {
 			return 0;
 		}
-		var cutoff  = dateAdd( "n", -arguments.olderThanMinutes, now() );
+		var cutoff  = dateAdd( "n", -maxAgeMinutes, now() );
 		var removed = 0;
 		var rows    = directoryList( dir, false, "query", "cbcs-*" );
 		for ( var row in rows ) {
@@ -374,7 +379,8 @@ component singleton accessors="true" {
 			"rawHeaders"          : [],
 			"cookies"             : [],
 			"fileContent"         : "",
-			"fileContentAsBinary" : "",
+			// An empty byte array, so the type matches the success path.
+			"fileContentAsBinary" : binaryDecode( "", "base64" ),
 			"charset"             : settings.defaultCharset ?: "utf-8",
 			"finalUrl"            : "",
 			"engineUsed"          : "",
@@ -417,8 +423,8 @@ component singleton accessors="true" {
 		if ( isSweepRecent( arguments.minutes ) ) {
 			return false;
 		}
-		var claimed = false;
-		lock name="cbcs-sweep-#hash( settings.workingDirectory, "MD5" )#" type="exclusive" timeout="5" {
+		var claimed= false;
+		lock name  ="cbcs-sweep-#hash( settings.workingDirectory, "MD5" )#" type="exclusive" timeout="5" {
 			if ( !isSweepRecent( arguments.minutes ) ) {
 				variables.lastSweepAt = getTickCount();
 				claimed               = true;
@@ -538,7 +544,9 @@ component singleton accessors="true" {
 
 	/**
 	 * Return a struct value or its fallback. CFML engines do not handle the ?: operator the same
-	 * way when a struct key is missing, so this method checks the key directly.
+	 * way when a struct key is missing, so this method checks the key directly. The fallback is
+	 * returned with isNull() instead of ?: because Adobe ColdFusion's ?: treats a boolean false
+	 * value like a missing value and would replace it.
 	 */
 	private any function opt(
 		required struct options,
@@ -548,7 +556,7 @@ component singleton accessors="true" {
 		if ( structKeyExists( arguments.options, arguments.key ) ) {
 			return arguments.options[ arguments.key ];
 		}
-		return arguments.fallback ?: "";
+		return isNull( arguments.fallback ) ? "" : arguments.fallback;
 	}
 
 }

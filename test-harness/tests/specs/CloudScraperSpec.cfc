@@ -92,6 +92,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				expect( result.ok ).toBeFalse();
 				expect( result.statusCode ).toBe( 0 );
 				expect( result.errorDetail ).toInclude( "timeout" );
+				// A failure result keeps the same types as a success result.
+				expect( isBinary( result.fileContentAsBinary ) ).toBeTrue();
 			} );
 
 			it( "returns ok=false when no response file is produced", function(){

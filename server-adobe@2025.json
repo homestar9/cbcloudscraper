@@ -11,20 +11,20 @@
         "rewrites":{
             "enable":"true"
         },
-		"webroot": "test-harness",
-		"aliases":{
+        "webroot":"test-harness",
+        "aliases":{
             "/moduleroot/cbcloudscraper":"../"
         }
     },
     "jvm":{
-		"heapSize":"768",
+        "heapSize":"768",
         "javaVersion":"openjdk21_jre"
     },
     "openBrowser":"false",
-	"cfconfig": {
-		"file" : ".cfconfig.json"
-	},
-    "scripts" : {
+    "cfconfig":{
+        "file":".cfconfig.json"
+    },
+    "scripts":{
         "onServerInstall":"cfpm install zip,debugger"
     }
 }

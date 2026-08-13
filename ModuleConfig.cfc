@@ -43,7 +43,6 @@ component {
 			"verifyChecksum"         : true,
 			// Request defaults
 			"defaultTimeout"         : 30, // Maximum request time in seconds.
-			"engineOrder"            : [ "curl_cffi", "cloudscraper" ], // Order used by the auto engine.
 			"defaultEngine"          : "auto", // Valid values: auto, curl_cffi, or cloudscraper.
 			"impersonate"            : "chrome", // Browser profile used by curl_cffi.
 			"followRedirects"        : true,
@@ -70,16 +69,26 @@ component {
 	 * This method does not check the executable. BinaryProvisioner checks it on the first request.
 	 */
 	function onLoad(){
-		if ( !directoryExists( settings.workingDirectory ) ) {
-			directoryCreate( settings.workingDirectory, true, true );
-		}
+		makeDirectory( settings.workingDirectory );
 
 		var configuredCookieDir = ( settings.cookieCache.directory ?: "" );
 		var cookieDir           = len( configuredCookieDir ) ? configuredCookieDir : ( settings.workingDirectory & "/cookies" );
-		if ( ( settings.cookieCache.enabled ?: false ) && !directoryExists( cookieDir ) ) {
-			directoryCreate( cookieDir, true, true );
+		if ( settings.cookieCache.enabled ?: false ) {
+			makeDirectory( cookieDir );
 		}
 		// BinaryProvisioner checks the executable on the first request.
+	}
+
+	/**
+	 * Create a directory and any missing parents. java.io.File.mkdirs() is used instead of
+	 * directoryCreate() because Adobe ColdFusion accepts only the path argument, and Lucee's
+	 * extra arguments make the file fail to compile on Adobe - even on a line that never runs.
+	 */
+	private boolean function makeDirectory( required string path ){
+		if ( directoryExists( arguments.path ) ) {
+			return true;
+		}
+		return createObject( "java", "java.io.File" ).init( javacast( "string", arguments.path ) ).mkdirs();
 	}
 
 	/**

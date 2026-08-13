@@ -19,6 +19,12 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 		var moduleRoot    = expandPath( "/cbcloudscraper" );
 		var moduleVersion = deserializeJSON( fileRead( expandPath( "/cbcloudscraper/box.json" ), "utf-8" ) ).version;
 
+		// Create a directory and its parents. directoryCreate() with extra arguments
+		// does not compile on Adobe ColdFusion, so use java.io.File.mkdirs() here.
+		var makeDirs = function( required string path ){
+			createObject( "java", "java.io.File" ).init( arguments.path ).mkdirs();
+		};
+
 		describe( "BinaryDownloader", function(){
 			var downloader = "";
 			var platform   = "";
@@ -60,7 +66,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( downloader.isCurrent( dir, "v1.0.0" ) ).toBeFalse();
 
 					// An executable without a version tag is treated as a local build and can be used.
-					directoryCreate( platDir, true, true );
+					makeDirs( platDir );
 					fileWrite( platDir & "/" & platform.exe, "not a real binary" );
 					expect( downloader.isPresent( dir ) ).toBeTrue();
 					expect( downloader.installedTag( dir ) ).toBe( "" );
@@ -84,6 +90,20 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					"all"
 				);
 				expect( path ).toBe( "C:/tmp/base/" & platform.dir & "/" & platform.exe );
+			} );
+
+			it( "calls the progress callback only when the caller provides a function", function(){
+				makePublic( downloader, "logMessage" );
+				var messages = [];
+				downloader.logMessage( function( message ){
+					messages.append( arguments.message );
+				}, "hello" );
+				expect( messages ).toBe( [ "hello" ] );
+
+				// The blank default and a non-function value are ignored without an error.
+				downloader.logMessage( "", "ignored" );
+				downloader.logMessage( { "not" : "a function" }, "ignored" );
+				expect( messages.len() ).toBe( 1 );
 			} );
 		} );
 	}

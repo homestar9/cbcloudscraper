@@ -83,10 +83,20 @@ component singleton {
 		if ( !len( dir ) ) {
 			dir = settings.workingDirectory & "/cookies";
 		}
-		if ( !directoryExists( dir ) ) {
-			directoryCreate( dir, true, true );
-		}
+		makeDirectory( dir );
 		return dir;
+	}
+
+	/**
+	 * Create a directory and any missing parents. java.io.File.mkdirs() is used instead of
+	 * directoryCreate() because Adobe ColdFusion accepts only the path argument, and Lucee's
+	 * extra arguments make the file fail to compile on Adobe - even on a line that never runs.
+	 */
+	private boolean function makeDirectory( required string path ){
+		if ( directoryExists( arguments.path ) ) {
+			return true;
+		}
+		return createObject( "java", "java.io.File" ).init( javacast( "string", arguments.path ) ).mkdirs();
 	}
 
 	/**

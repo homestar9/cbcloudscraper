@@ -102,7 +102,7 @@ component singleton accessors="true" {
 	 * @baseURL        The GitHub Releases base URL, such as ".../releases/download".
 	 * @verifyChecksum Verify the download's SHA-256 before using it.
 	 * @force          Download even when the cache already matches.
-	 * @log            Optional callback function( message ) for progress output.
+	 * @onProgress     Optional callback function( message ) for progress output.
 	 *
 	 * @return A struct with action, path, tag, and present values.
 	 */
@@ -112,7 +112,7 @@ component singleton accessors="true" {
 		required string baseURL,
 		boolean verifyChecksum = true,
 		boolean force          = false,
-		any log                = ""
+		any onProgress         = ""
 	){
 		var platform   = getPlatform();
 		var targetDir  = normalizeSlashes( arguments.baseDir ) & "/" & platform.dir;
@@ -127,8 +127,8 @@ component singleton accessors="true" {
 			};
 		}
 
-		writeLog(
-			arguments.log,
+		logMessage(
+			arguments.onProgress,
 			"Downloading cbcloudscraper binary " & arguments.tag & " (" & platform.asset & ")..."
 		);
 		download(
@@ -137,10 +137,11 @@ component singleton accessors="true" {
 			binaryFile,
 			arguments.tag,
 			arguments.baseURL,
-			arguments.verifyChecksum
+			arguments.verifyChecksum,
+			arguments.onProgress
 		);
 		writeStamp( targetDir, arguments.tag );
-		writeLog( arguments.log, "cbcloudscraper binary ready: " & binaryFile );
+		logMessage( arguments.onProgress, "cbcloudscraper binary ready: " & binaryFile );
 
 		return {
 			"action"  : ( isPresent( arguments.baseDir ) && arguments.force ? "reinstalled" : "installed" ),
@@ -222,15 +223,14 @@ component singleton accessors="true" {
 		required string binaryFile,
 		required string tag,
 		required string baseURL,
-		required boolean verifyChecksum
+		required boolean verifyChecksum,
+		any onProgress = ""
 	){
 		var zipURL   = reReplace( arguments.baseURL, "/$", "" ) & "/" & arguments.tag & "/" & arguments.platform.asset;
 		var stageDir = normalizeSlashes( getTempDirectory() ) & "/cbcloudscraper-download";
 		var zipPath  = stageDir & "/" & arguments.platform.asset;
 
-		if ( !directoryExists( stageDir ) ) {
-			directoryCreate( stageDir, true, true );
-		}
+		makeDirectory( stageDir );
 
 		try {
 			cfhttp(
@@ -265,14 +265,14 @@ component singleton accessors="true" {
 		}
 
 		if ( arguments.verifyChecksum ) {
-			verifyChecksum( zipURL, zipPath );
+			assertChecksum( zipURL, zipPath, arguments.onProgress );
 		}
 
 		// Replace the whole platform directory so files from older builds are removed.
 		if ( directoryExists( arguments.targetDir ) ) {
 			directoryDelete( arguments.targetDir, true );
 		}
-		directoryCreate( arguments.targetDir, true, true );
+		makeDirectory( arguments.targetDir );
 		cfzip(
 			action      = "unzip",
 			file        = zipPath,
@@ -307,8 +307,15 @@ component singleton accessors="true" {
 	/**
 	 * Compare the archive with its published .sha256 checksum. Skip this check when the checksum
 	 * file is missing. Reject the archive when a published checksum does not match.
+	 *
+	 * The name is not "verifyChecksum" because ensure() and download() have a boolean argument
+	 * with that name, and an unscoped call would resolve to the argument instead of this method.
 	 */
-	private void function verifyChecksum( required string zipURL, required string zipPath ){
+	private void function assertChecksum(
+		required string zipURL,
+		required string zipPath,
+		any onProgress = ""
+	){
 		var sumURL   = arguments.zipURL & ".sha256";
 		var expected = "";
 		try {
@@ -331,6 +338,10 @@ component singleton accessors="true" {
 		}
 
 		if ( !len( expected ) ) {
+			logMessage(
+				arguments.onProgress,
+				"Warning: could not read the published SHA-256 checksum at " & sumURL & ". Skipping checksum verification for this download."
+			);
 			return;
 		}
 
@@ -367,10 +378,38 @@ component singleton accessors="true" {
 		);
 	}
 
-	private void function writeLog( any log, required string message ){
-		if ( !isSimpleValue( arguments.log ) && isCustomFunction( arguments.log ) ) {
-			arguments.log( arguments.message );
+	/**
+	 * Call the progress callback with a message. Do nothing when no callback was given.
+	 *
+	 * The name is not "writeLog" because that is a built-in CFML function, and Lucee resolves
+	 * an unscoped call to the built-in instead of this method.
+	 */
+	private void function logMessage( any onProgress, required string message ){
+		if ( isNull( arguments.onProgress ) || isSimpleValue( arguments.onProgress ) ) {
+			return;
 		}
+		var callable = false;
+		try {
+			callable = isClosure( arguments.onProgress ) || isCustomFunction( arguments.onProgress );
+		} catch ( any e ) {
+			// Adobe ColdFusion's isCustomFunction can throw when the value is not a function.
+			callable = false;
+		}
+		if ( callable ) {
+			arguments.onProgress( arguments.message );
+		}
+	}
+
+	/**
+	 * Create a directory and any missing parents. java.io.File.mkdirs() is used instead of
+	 * directoryCreate() because Adobe ColdFusion accepts only the path argument, and Lucee's
+	 * extra arguments make the file fail to compile on Adobe - even on a line that never runs.
+	 */
+	private boolean function makeDirectory( required string path ){
+		if ( directoryExists( arguments.path ) ) {
+			return true;
+		}
+		return createObject( "java", "java.io.File" ).init( javacast( "string", arguments.path ) ).mkdirs();
 	}
 
 }

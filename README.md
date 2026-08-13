@@ -45,6 +45,10 @@ You can also install the module from its GitHub repository:
 box install homestar9/cbcloudscraper
 ```
 
+When you add the module to an application that is already running, restart the server fully.
+A framework reinit (`?fwreinit=1`) is not enough to register a new module and can leave the
+application unable to serve requests until the next restart.
+
 The first request downloads the helper program from the matching GitHub Release. The module
 checks the download and stores it in the module's `bin/` directory. Later requests use the stored
 copy.
@@ -220,8 +224,8 @@ var result = scraper.get(
 | Option | Default | What it does |
 | --- | --- | --- |
 | `engine` | `"auto"` | Chooses `auto`, `curl_cffi`, or `cloudscraper`. |
-| `impersonate` | `"chrome"` | Chooses the browser fingerprint used by `curl_cffi`. |
-| `timeout` | `30` | Sets the HTTP timeout in seconds. |
+| `impersonate` | `"chrome"` | Chooses the browser fingerprint used by `curl_cffi`. See the list of values below. |
+| `timeout` | `30` | The maximum time for the whole request in seconds, not just the connection. The module stops the helper process 5 seconds after this limit. |
 | `headers` | `{}` | Adds request headers. A request header replaces a default header with the same name. |
 | `followRedirects` | `true` | Follows HTTP redirects. |
 | `verifySSL` | `true` | Checks the target site's TLS certificate. |
@@ -232,6 +236,20 @@ var result = scraper.get(
 The module settings provide these defaults. See [Configuration](#configuration) to change them
 for every request.
 
+### `impersonate` values
+
+The module passes the `impersonate` value to `curl_cffi` without changes, so the valid values
+come from the bundled `curl_cffi` build (currently 0.16.0). The setting only affects the
+`curl_cffi` engine.
+
+- A bare browser name uses the newest fingerprint in the bundle: `chrome`, `edge`, `safari`,
+  `firefox`, or `tor`.
+- A versioned name pins one fingerprint, for example `chrome131`, `chrome99_android`, `edge101`,
+  `safari184`, or `firefox135`.
+
+See the [curl_cffi impersonation list](https://github.com/lexiforest/curl_cffi?tab=readme-ov-file#supported-browsers)
+for every supported value. An unknown value makes the `curl_cffi` engine fail for that request.
+
 ## Result struct
 
 Both request methods return the same struct.
@@ -239,10 +257,10 @@ Both request methods return the same struct.
 | Key | Meaning |
 | --- | --- |
 | `ok` | `true` when an HTTP response was received. `false` when an operational failure stopped the request. |
-| `statusCode` | The HTTP status code. The value is `0` when `ok` is false. |
+| `statusCode` | The HTTP status code as a **number**, such as `200`. This differs from `cfhttp`, which returns a string such as `"200 OK"`. The value is `0` when `ok` is false. |
 | `statusText` | The HTTP status reason, such as `OK` or `Not Found`. |
 | `fileContent` | The response body decoded as text. |
-| `fileContentAsBinary` | The response body as raw bytes. Use this value for images, PDFs, and other binary files. |
+| `fileContentAsBinary` | The response body as raw bytes. Use this value for images, PDFs, and other binary files. This value is always a byte array; it has zero length when `ok` is false. |
 | `charset` | The character set used to decode `fileContent`. |
 | `headers` | A case-insensitive struct of response headers. The last value wins when a header appears more than once. |
 | `rawHeaders` | An array of `{name, value}` structs. This array keeps repeated headers such as `Set-Cookie`. |
@@ -284,6 +302,31 @@ When you run `box update cbcloudscraper`, the module version may change. The nex
 the stored helper's release tag. The module downloads the matching helper when the tags do not
 match.
 
+## Deploy to a server
+
+Most applications do not commit the `modules/` directory, so every production deploy starts
+without the helper program. Without a deploy step, the first request after a deploy pays the
+GitHub download — a problem when that request is an unattended scheduled task. Two ways to
+provision the helper ahead of the first request:
+
+1. Run the install task as part of the deploy, after `box install`:
+
+   ```bash
+   box task run taskFile=modules/cbcloudscraper/tasks/Binary.cfc :action=install
+   ```
+
+2. Or call `warmup()` from your application's startup code. It downloads the helper when needed
+   and throws `cbcloudscraper.BinaryUnavailable` when it cannot, so a bad deploy fails at startup
+   instead of at the first request.
+
+Two more production recommendations:
+
+- Set an explicit `workingDirectory`. The default lives under `java.io.tmpdir`, which changes
+  with how the server process starts, and two applications on the same server share the same
+  default directory.
+- If your server cannot reach GitHub, see
+  [Use the module without GitHub access](#use-the-module-without-github-access).
+
 ## Use the module without GitHub access
 
 Download `cbcloudscraper-win64.zip` from the matching GitHub Release on a computer that can
@@ -302,6 +345,11 @@ moduleSettings = {
 
 `binaryPath` always takes priority. The module does not download or update the helper when this
 setting contains a path.
+
+You can also unzip the release archive into the module's `bin/` directory instead of setting
+`binaryPath`. A hand-copied helper has no version stamp file, so the module treats it as current
+and never replaces it automatically. When you update the module, replace the helper by hand as
+well.
 
 ## Store cookies between requests
 

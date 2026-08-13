@@ -22,7 +22,9 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				var settings = getInstance( dsl = "coldbox:moduleSettings:cbcloudscraper" );
 				expect( settings ).toHaveKey( "binaryPath" );
 				expect( settings ).toHaveKey( "defaultEngine" );
-				expect( settings.engineOrder ).toBeArray();
+				expect( settings ).toHaveKey( "impersonate" );
+				// engineOrder was removed in 1.0.1. The helper decides the auto engine order.
+				expect( settings ).notToHaveKey( "engineOrder" );
 			} );
 
 			it( "wires the CloudScraper model with its collaborators", function(){

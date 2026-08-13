@@ -7,6 +7,8 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-13
+
 ### Added
 
 - Added a `downloadTo` request option that writes a response body straight to a file. The helper

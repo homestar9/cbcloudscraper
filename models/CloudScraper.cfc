@@ -11,9 +11,8 @@
  * running the executable sets ok to false and adds errorDetail. Set options.throwOnError to true
  * when the code should throw these process errors instead.
  *
- * Set options.downloadTo to an absolute path to send a large response straight to a file. The
- * executable writes the file in chunks, so the body never travels through base64 or through CFML
- * memory. See the "Download a large file" section of README.md.
+ * Set options.downloadTo to an absolute path to save a large response to a file. The executable
+ * writes the file in chunks. It does not put the body in response JSON or CFML memory.
  */
 component singleton accessors="true" {
 
@@ -123,11 +122,9 @@ component singleton accessors="true" {
 		}
 		req[ "cookieJarPath" ] = jarPath;
 
-		// Name the in-progress file for a download. The executable writes here and renames the
-		// finished file onto the target. The file sits beside the target so the rename stays on
-		// one volume, which is what makes it atomic. Eight characters of the request's UUID keep
-		// two downloads of the same target apart without making the path much longer, which
-		// matters because Windows still limits many paths to 260 characters.
+		// Write each download to a unique .part file next to the target. Keeping both files on the
+		// same volume lets the worker rename the completed file atomically. The UUID keeps two
+		// requests for the same target separate. Use only eight UUID characters to limit path length.
 		var downloadTo = structKeyExists( req, "downloadTo" ) ? req.downloadTo : "";
 		var partPath   = "";
 		if ( len( downloadTo ) ) {
@@ -214,10 +211,8 @@ component singleton accessors="true" {
 			}
 			safeDelete( reqPath );
 			safeDelete( resPath );
-			// Remove the download's in-progress file. This matters most on a timeout, because
-			// ProcessRunner stops the executable with destroyForcibly() and it never gets a chance
-			// to clean up after itself. On a successful download the file was already renamed to
-			// the target, so safeDelete() finds nothing and does nothing.
+			// Delete the .part file if the worker did not rename it. This can happen when a timeout
+			// kills the worker before the worker can clean up.
 			safeDelete( partPath );
 			if ( !( settings.keepFailureLogs ?: false ) ) {
 				safeDelete( logPath );
@@ -273,7 +268,7 @@ component singleton accessors="true" {
 	){
 		var opts = arguments.options;
 
-		// Resolve the download target first, because it decides which timeout default applies.
+		// Resolve downloadTo first because it selects the default timeout.
 		var downloadTo = trim( opt( opts, "downloadTo", "" ) );
 		if ( len( downloadTo ) ) {
 			downloadTo = prepareDownloadTarget( downloadTo );
@@ -282,8 +277,7 @@ component singleton accessors="true" {
 		 ? ( settings.defaultDownloadTimeout ?: 300 )
 		 : settings.defaultTimeout;
 
-		// Check the key directly. Adobe ColdFusion's ?: operator treats a boolean false value like
-		// a missing value, which would turn a configured false back into true.
+		// Check the key directly. Adobe ColdFusion treats false as missing when ?: is used.
 		var onlyOn2xxDefault = structKeyExists( settings, "downloadOnlyOn2xx" )
 		 ? settings.downloadOnlyOn2xx
 		 : true;
@@ -298,7 +292,7 @@ component singleton accessors="true" {
 			"timeoutSeconds"    : opt( opts, "timeout", fallbackTimeout ),
 			"downloadTo"        : downloadTo,
 			"downloadOnlyOn2xx" : opt( opts, "downloadOnlyOn2xx", onlyOn2xxDefault ),
-			// Only CFML reads this one. The executable ignores it.
+			// CFML uses this option when it builds the result. The executable ignores it.
 			"decodeText"        : opt( opts, "decodeText", true ),
 			"followRedirects"   : opt(
 				opts,
@@ -327,11 +321,10 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Check a downloadTo path and create the directory that will hold the file.
+	 * Validate downloadTo and create its parent directory.
 	 *
-	 * The path must be absolute. A relative path would mean something different on each engine and
-	 * operating system, so this method rejects it and tells the caller to run expandPath() instead.
-	 * Failing here also means a bad path is caught before an executable process starts.
+	 * The path must be absolute so CFML and the worker use the same target. Reject invalid paths
+	 * before starting the worker.
 	 *
 	 * @path The caller's downloadTo value.
 	 *
@@ -365,15 +358,13 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Delete in-progress download files left beside a target by an earlier run.
+	 * Delete stale .part files left beside a download target.
 	 *
-	 * send()'s finally block removes this file when a request fails, but that only runs when the
-	 * CFML process lives long enough. A server that is killed during a download leaves the file
-	 * behind, and sweepTempFiles() never sees it because it only looks inside workingDirectory.
+	 * send() removes the current .part file after a failed request. A stopped server cannot run
+	 * that cleanup. sweepTempFiles() also misses these files because it checks workingDirectory.
 	 *
-	 * Only files older than the cutoff are removed, so a download that is still running is left
-	 * alone. The cutoff is at least one hour, because tempSweepMinutes describes short-lived
-	 * request files and can be set lower than a large download takes.
+	 * Keep files newer than the cutoff because another download may still use them. Use a cutoff of
+	 * at least one hour because a large download may outlive the normal temporary-file setting.
 	 *
 	 * @target The downloadTo path for the request that is about to start.
 	 */
@@ -401,7 +392,7 @@ component singleton accessors="true" {
 				}
 			}
 		} catch ( any e ) {
-			// A problem reading the target's directory must not stop the download itself.
+			// A cleanup error must not stop the new download.
 			logger.debug( "cbcloudscraper could not check for leftover download files: " & e.message );
 		}
 	}
@@ -453,9 +444,8 @@ component singleton accessors="true" {
 		var bodyBytes = download.bodyBytes;
 		var charset   = arguments.raw.bodyCharset ?: ( settings.defaultCharset ?: "utf-8" );
 
-		// Skip the text copy when the body went to a file, and when the caller asked for bytes
-		// only. charsetEncode() builds a second full copy of the body as a CFML string, which for
-		// a large response can cost more heap than the bytes themselves.
+		// Do not convert the body to text after a file download or when decodeText is false.
+		// charsetEncode() would create another full copy of the body in memory.
 		var wantsText = !len( download.downloadedTo )
 		&& ( structKeyExists( arguments.request, "decodeText" ) ? arguments.request.decodeText : true );
 
@@ -497,11 +487,10 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Work out what happened to the response body, and write the file when the executable did not.
+	 * Return the response body or file-download details.
 	 *
-	 * A current executable handles downloadTo itself and reports downloadedTo in its response. An
-	 * executable older than this module does not know the option, ignores it, and returns the whole
-	 * body as usual. A missing downloadedTo key is how this method tells the two apart.
+	 * Workers with download support always return a downloadedTo key. Older workers omit that key
+	 * and return the full body as base64. Write that body to the target for backward compatibility.
 	 *
 	 * @raw     The response struct read from the executable's response file.
 	 * @request The request struct that produced this response.
@@ -528,15 +517,14 @@ component singleton accessors="true" {
 			};
 		}
 
-		// The executable is older than this module. Write the file here so the option still works,
-		// and say so, because this path loses every memory saving the option exists for.
+		// An older worker returned the body to CFML. Write the file here for compatibility.
+		// This path still uses memory for the full body.
 		logger.warn(
 			"cbcloudscraper wrote the downloadTo file itself because the helper executable is older than this module and does not support downloads. Update the helper to get the memory savings. Run CloudScraper.warmup() after clearing the bin directory, or set autoDownloadBinary to true."
 		);
 
-		// Only a 2xx body is written on this path. CFML cannot tell a Cloudflare block page from a
-		// real response the way the current executable can, so honoring downloadOnlyOn2xx=false
-		// here could replace a good file with a block page.
+		// Older workers cannot identify a Cloudflare challenge before returning the body to CFML.
+		// Save only 2xx responses so a challenge page cannot replace an existing file.
 		var status = arguments.raw.statusCode ?: 0;
 		if ( status < 200 || status >= 300 ) {
 			return {
@@ -548,7 +536,7 @@ component singleton accessors="true" {
 
 		fileWrite( target, bodyBytes );
 		return {
-			// Empty, so a caller sees the same result whichever executable answered.
+			// Return empty bytes to match the result from a worker with download support.
 			"bodyBytes"    : binaryDecode( "", "base64" ),
 			"downloadedTo" : target,
 			"bytesWritten" : getFileInfo( target ).size

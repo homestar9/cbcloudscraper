@@ -43,11 +43,10 @@ component {
 			"verifyChecksum"         : true,
 			// Request defaults
 			"defaultTimeout"         : 30, // Maximum request time in seconds.
-			// Used instead of defaultTimeout when a request sets downloadTo and does not set its
-			// own timeout. A large file needs more time than a normal page request.
+			// Use this timeout when downloadTo is set and the request has no timeout.
+			// File downloads may take longer than page requests.
 			"defaultDownloadTimeout" : 300,
-			// Default for the downloadOnlyOn2xx request option. True keeps an error page from
-			// replacing a file that downloaded successfully on an earlier run.
+			// By default, save only 2xx responses. This protects an existing file from error responses.
 			"downloadOnlyOn2xx"      : true,
 			"defaultEngine"          : "auto", // Valid values: auto, curl_cffi, or cloudscraper.
 			"impersonate"            : "chrome", // Browser profile used by curl_cffi.

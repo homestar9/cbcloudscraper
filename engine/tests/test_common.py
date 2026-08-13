@@ -1,8 +1,7 @@
-"""Unit tests for engines/common.py.
+"""Tests for engines/common.py.
 
-These cover the download logic and the request-value helpers. They use Python's
-built-in unittest so the project needs no extra dependency, and they use a small fake
-response object so no HTTP library is involved.
+The tests use Python's built-in unittest and a fake response. They do not need a
+network connection or an HTTP library.
 
 Run from the engine directory:
 
@@ -17,10 +16,10 @@ from engines import common
 
 
 class FakeResponse:
-    """Stands in for a curl_cffi or requests response object.
+    """Provide the response fields that common.py reads in these tests.
 
-    Only the three things common.py reads are provided: the status code, the headers,
-    and the whole body for the no-download path.
+    The fields are the status code, headers, and full body for a request without a
+    download path.
     """
 
     def __init__(self, status_code=200, headers=None, content=b""):
@@ -30,7 +29,7 @@ class FakeResponse:
 
 
 def chunks_of(data, size=8):
-    """Yield ``data`` in small pieces, the way a streamed response arrives."""
+    """Yield ``data`` in small pieces like a streamed response."""
     for start in range(0, len(data), size):
         yield data[start : start + size]
 
@@ -41,7 +40,7 @@ class AsBoolTests(unittest.TestCase):
         self.assertFalse(common.as_bool(False, True))
 
     def test_string_false_is_false(self):
-        # bool("false") is True in Python, which is the whole reason this helper exists.
+        # Python treats the non-empty string "false" as true.
         self.assertFalse(common.as_bool("false", True))
         self.assertFalse(common.as_bool("FALSE", True))
         self.assertFalse(common.as_bool("no", True))
@@ -86,7 +85,7 @@ class ChallengeMarkerTests(unittest.TestCase):
 class CheckLengthTests(unittest.TestCase):
     def test_matching_length_passes(self):
         response = FakeResponse(headers={"Content-Length": "10"})
-        common._check_length(response, 10)  # no exception
+        common._check_length(response, 10)  # A matching size must not raise an error.
 
     def test_short_write_raises(self):
         response = FakeResponse(headers={"Content-Length": "1000"})
@@ -94,18 +93,18 @@ class CheckLengthTests(unittest.TestCase):
             common._check_length(response, 400)
 
     def test_missing_header_skips_the_check(self):
-        common._check_length(FakeResponse(), 400)  # no exception
+        common._check_length(FakeResponse(), 400)  # A missing size cannot be checked.
 
     def test_unreadable_header_skips_the_check(self):
         response = FakeResponse(headers={"Content-Length": "not a number"})
-        common._check_length(response, 400)  # no exception
+        common._check_length(response, 400)  # An invalid size cannot be checked.
 
     def test_compressed_body_skips_the_check(self):
-        # The HTTP library decompressed the body, so the header size cannot match.
+        # The HTTP library returns decompressed bytes, but the header has the compressed size.
         response = FakeResponse(
             headers={"Content-Length": "1000", "Content-Encoding": "gzip"}
         )
-        common._check_length(response, 4000)  # no exception
+        common._check_length(response, 4000)  # The two sizes cannot be compared.
 
     def test_identity_encoding_still_checks(self):
         response = FakeResponse(
@@ -205,7 +204,7 @@ class ReceiveBodyTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.target))
 
     def test_a_403_from_another_server_is_still_a_normal_response(self):
-        # Not Cloudflare, so downloadOnlyOn2xx alone decides. With it off, write it.
+        # downloadOnlyOn2xx is false, so a non-Cloudflare 403 response can be saved.
         page = b"access denied"
         response = FakeResponse(status_code=403, headers={"Server": "nginx"})
         request = self.request(downloadonlyon2xx=False)
@@ -228,7 +227,7 @@ class ReceiveBodyTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.target))
 
     def test_only_2xx_reads_the_string_false(self):
-        # A CFML engine can send the flag as text; bool("false") would be True.
+        # A CFML engine may send this option as the string "false".
         page = b"<h1>Not Found</h1>"
         response = FakeResponse(status_code=404)
         request = self.request(downloadonlyon2xx="false")

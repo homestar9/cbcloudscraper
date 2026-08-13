@@ -1,8 +1,8 @@
 /**
- * Small file and directory helpers shared by this module's models.
+ * File and directory helpers shared by this module's models.
  *
- * These exist so the same code is not copied into several components. ModuleConfig.cfc keeps
- * its own copy of makeDirectory() because onLoad() runs before WireBox can build a model.
+ * ModuleConfig.cfc keeps its own makeDirectory() method. Its onLoad() method runs before WireBox
+ * can create this component.
  */
 component singleton {
 
@@ -13,9 +13,9 @@ component singleton {
 	/**
 	 * Create a directory and any missing parents.
 	 *
-	 * java.io.File.mkdirs() is used instead of directoryCreate() because Adobe ColdFusion accepts
-	 * only the path argument, and Lucee's extra arguments make the file fail to compile on Adobe -
-	 * even on a line that never runs.
+	 * Use java.io.File.mkdirs() because directoryCreate() differs between CFML engines. Adobe
+	 * ColdFusion accepts only the path argument. Lucee-only arguments cause a compile error on
+	 * Adobe, even when the code is in a branch that does not run.
 	 *
 	 * @path The directory to create.
 	 *

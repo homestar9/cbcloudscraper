@@ -12,10 +12,9 @@ travel inside the request file, which avoids command-line length limits and quot
 problems. The response body is base64-encoded so it arrives byte-for-byte no matter
 its character set, compression, or content.
 
-A request can instead set "downloadto" to an absolute path. The body is then written
-to that path in chunks and never base64-encoded, which is much cheaper for a large
-file. The response reports the path in "downloadedTo" and the size in "bytesWritten",
-and "bodyBase64" is empty.
+Set "downloadto" to an absolute path to save the body to a file. The worker writes
+the body in chunks and does not encode it as base64. The response sets "downloadedTo"
+and "bytesWritten". It leaves "bodyBase64" empty.
 
 Exit code:
     0  an HTTP response was received (any status, including 403 or 404).
@@ -69,8 +68,8 @@ def looks_like_challenge(result):
     if result.get("statusCode", 0) in CHALLENGE_STATUSES:
         return True
 
-    # bodyBytes is empty after a download was written to a file, and a download is only
-    # written when the engine already ruled out a challenge, so there is nothing to scan.
+    # A file download has no bodyBytes. receive_body() already checked the response for
+    # Cloudflare challenge markers before saving it.
     return head_has_challenge_marker(result.get("bodyBytes", b""))
 
 
@@ -150,7 +149,7 @@ def failure_response(message, errors):
         "cookies": [],
         "bodyBase64": "",
         "bodyCharset": "utf-8",
-        # Always present, so CFML can tell a current worker from an older one.
+        # These keys identify workers that support downloadTo.
         "downloadedTo": "",
         "bytesWritten": 0,
         "error": {"type": "worker", "message": message, "engineNotes": errors},

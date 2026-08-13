@@ -10,13 +10,13 @@
  * then check both sides of the exchange. Set behavior to simulate a timeout, missing response
  * file, nonzero exit code, or invalid response data.
  *
- * The normal behavior also handles downloads. When the request carries a downloadTo path, the mock
- * writes downloadBody to that path and answers the way a current executable does.
+ * For downloads, the normal behavior writes downloadBody to the request's downloadTo path. The
+ * response matches a worker that supports downloads.
  */
 component accessors="true" {
 
-	// Valid values: normal, timeout, noFile, errorResponse, malformed, oldHelper, downloadError,
-	// or partialThenFail.
+	// Supported values: normal, timeout, noFile, errorResponse, malformed, oldHelper,
+	// downloadError, and partialThenFail.
 	property name="behavior";
 	property name="response"; // Response struct written when behavior is normal.
 	property name="downloadBody"; // Bytes written to downloadTo when the request asks for a download.
@@ -88,8 +88,8 @@ component accessors="true" {
 					"logPath"  : arguments.logPath
 				};
 			case "oldHelper":
-				// Answer the way a 1.0.1 executable does: ignore downloadTo, return the whole body,
-				// and leave out the two keys a current executable always sends.
+				// Simulate version 1.0.1. It ignores downloadTo, returns the full body, and omits
+				// the download result fields.
 				var legacy = duplicate( variables.response );
 				structDelete( legacy, "downloadedTo" );
 				structDelete( legacy, "bytesWritten" );
@@ -100,7 +100,7 @@ component accessors="true" {
 					"logPath"  : arguments.logPath
 				};
 			case "downloadError":
-				// The site answered with an error, so the executable left the target file alone.
+				// Return an HTTP error without changing the target file.
 				var errorResponse               = duplicate( variables.response );
 				errorResponse[ "statusCode" ]   = 403;
 				errorResponse[ "statusText" ]   = "Forbidden";
@@ -117,8 +117,7 @@ component accessors="true" {
 					"logPath"  : arguments.logPath
 				};
 			case "partialThenFail":
-				// Leave a half-written download behind, then time out, so a test can prove that
-				// CloudScraper deletes the leftover file.
+				// Write part of the file and then report a timeout. CloudScraper should delete it.
 				var partPath = variables.lastRequest.downloadPartPath ?: "";
 				if ( len( partPath ) ) {
 					fileWrite( partPath, "half a file" );
@@ -139,10 +138,10 @@ component accessors="true" {
 	}
 
 	/**
-	 * Return the response for the normal behavior.
+	 * Return the normal mock response.
 	 *
-	 * When the request asked for a download, write downloadBody to the target and answer the way a
-	 * current executable does: the two download keys are filled in and bodyBase64 is empty.
+	 * If the request has downloadTo, write downloadBody to that path. Return the download path and
+	 * byte count, and leave bodyBase64 empty.
 	 */
 	private struct function downloadAwareResponse(){
 		var target = variables.lastRequest.downloadTo ?: "";
@@ -188,7 +187,7 @@ component accessors="true" {
 			],
 			"bodyBase64"   : binaryEncode( charsetDecode( "Hello, cbcloudscraper!", "utf-8" ), "base64" ),
 			"bodyCharset"  : "utf-8",
-			// A current executable always sends these two, even when no download was requested.
+			// Workers with download support always include these fields.
 			"downloadedTo" : "",
 			"bytesWritten" : 0,
 			"error"        : ""

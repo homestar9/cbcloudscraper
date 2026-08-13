@@ -31,7 +31,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				mockRunner = new tests.resources.MockRunner();
 				cs.setRunner( mockRunner ); // Prevent unit tests from starting the real executable.
 
-				// A private directory per test, so download tests cannot see each other's files.
+				// Give each test its own download directory.
 				tempDir = replace( getTempDirectory(), "\", "/", "all" );
 				tempDir = reReplace( tempDir, "/$", "" ) & "/cbcs-spec-" & createUUID();
 				createObject( "java", "java.io.File" ).init( javacast( "string", tempDir ) ).mkdirs();
@@ -154,7 +154,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 
 				expect( result.ok ).toBeTrue();
 				expect( result.fileContent ).toBe( "" );
-				// The bytes are still there, and still the same type as any other result.
+				// decodeText skips the string copy but keeps the binary body.
 				expect( isBinary( result.fileContentAsBinary ) ).toBeTrue();
 				expect( charsetEncode( result.fileContentAsBinary, "utf-8" ) ).toBe( "Hello, cbcloudscraper!" );
 			} );
@@ -167,9 +167,9 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					var sent = mockRunner.getLastRequest();
 					expect( sent.downloadTo ).toBe( target );
 					expect( sent.downloadOnlyOn2xx ).toBeTrue();
-					// defaultDownloadTimeout, not the 30 second defaultTimeout.
+					// Use defaultDownloadTimeout instead of the normal request timeout.
 					expect( sent.timeoutSeconds ).toBe( 300 );
-					// The in-progress file sits beside the target so the rename stays atomic.
+					// Keep the .part file beside the target so the final rename can be atomic.
 					expect( sent.downloadPartPath ).toInclude( target & ".cbcs-" );
 					expect( sent.downloadPartPath ).toEndWith( ".part" );
 				} );
@@ -198,20 +198,19 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( fileExists( target ) ).toBeTrue();
 					expect( fileRead( target, "utf-8" ) ).toBe( "a,b#chr( 13 )##chr( 10 )#1,2" );
 
-					// No text copy and no bytes in memory, but the types still match a normal result.
+					// A file download returns an empty string and empty binary value for the body.
 					expect( result.fileContent ).toBe( "" );
 					expect( isBinary( result.fileContentAsBinary ) ).toBeTrue();
-					// Base64 of an empty byte array is an empty string on every CFML engine.
+					// Every supported CFML engine encodes an empty byte array as an empty string.
 					expect( binaryEncode( result.fileContentAsBinary, "base64" ) ).toBe( "" );
 				} );
 
 				it( "leaves the target file alone when the site returns an error", function(){
 					var target = tempDir & "/report.csv";
 					fileWrite( target, "yesterday's good data" );
-					// Read the file back before the request instead of comparing against the text
-					// that was written. Adobe ColdFusion 2025 adds a line ending to fileWrite() when
-					// it writes a string, so only the file's own before-and-after values can be
-					// compared on every engine.
+					// Compare the file contents before and after the request. Adobe ColdFusion 2025
+					// adds a line ending when fileWrite() receives a string. Comparing with the
+					// original string would fail only on Adobe ColdFusion.
 					var before = fileRead( target, "utf-8" );
 					mockRunner.setBehavior( "downloadError" );
 
@@ -225,7 +224,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( result.bytesWritten ).toBe( 0 );
 					expect( fileRead( target, "utf-8" ) ).toBe( before );
 					expect( before ).toInclude( "yesterday's good data" );
-					// The error page comes back in memory so the caller can see what happened.
+					// Return the error page in memory so the caller can inspect it.
 					expect( result.fileContent ).toInclude( "Forbidden" );
 				} );
 
@@ -238,7 +237,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 						options = { "downloadTo" : target }
 					);
 
-					// The result looks the same as it does with a current executable.
+					// Keep the same result shape used by workers that support downloads.
 					expect( result.downloadedTo ).toBe( target );
 					expect( result.bytesWritten ).toBe( 22 );
 					expect( fileRead( target, "utf-8" ) ).toBe( "Hello, cbcloudscraper!" );
@@ -268,9 +267,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					var fresh  = target & ".cbcs-c0ffee00.part";
 					fileWrite( stale, "left over after a crash" );
 					fileWrite( fresh, "another download is running" );
-					// Only files older than the cutoff are removed, so age the stale one by three
-					// hours. Java sets the timestamp because the CFML function for it differs
-					// between engines.
+					// Make the stale file three hours old so it is past the cleanup cutoff. Use Java
+					// because CFML engines use different functions to set a file timestamp.
 					var threeHoursAgo = createObject( "java", "java.lang.System" ).currentTimeMillis() - 10800000;
 					createObject( "java", "java.io.File" )
 						.init( javacast( "string", stale ) )
@@ -310,8 +308,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				} );
 
 				it( "uses the downloadOnlyOn2xx module setting, including a configured false", function(){
-					// Adobe ColdFusion's ?: operator treats boolean false like a missing value, so a
-					// configured false must not turn back into true on the way to the executable.
+					// Adobe ColdFusion treats false as missing when ?: is used. The request must keep
+					// the configured false value.
 					var settings = getInstance( dsl = "coldbox:moduleSettings:cbcloudscraper" );
 					var original = settings.downloadOnlyOn2xx;
 					try {
@@ -322,7 +320,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 						);
 						expect( mockRunner.getLastRequest().downloadOnlyOn2xx ).toBeFalse();
 
-						// A per-request value still wins over the module setting.
+						// The request option overrides the module setting.
 						cs.get(
 							url     = "https://example.com/report.csv",
 							options = {
@@ -369,7 +367,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( fileExists( target ) ).toBeTrue();
 					expect( getFileInfo( target ).size ).toBe( result.bytesWritten );
 					expect( fileRead( target, "utf-8" ) ).toInclude( "Example Domain" );
-					// The body never travelled through memory.
+					// A file download returns no body text to CFML.
 					expect( result.fileContent ).toBe( "" );
 				}
 			);

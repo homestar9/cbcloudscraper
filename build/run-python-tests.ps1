@@ -3,10 +3,9 @@
     Run the worker's Python unit tests.
 
 .DESCRIPTION
-    Runs engine\tests with Python's built-in unittest runner, using the virtual
-    environment that build-binary.ps1 creates. These tests cover the download logic and
-    the request-value helpers in engine\engines\common.py. They need no network
-    connection and no built binary, so run them before starting a PyInstaller build.
+    Uses Python's built-in unittest runner and the virtual environment created by
+    build-binary.ps1. The tests do not need a network connection or a built executable.
+    Run them before starting a PyInstaller build.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File build\run-python-tests.ps1
@@ -25,7 +24,7 @@ if (-not (Test-Path $Python)) {
 
 Push-Location $EngineDir
 try {
-    # -t . makes the engine directory the top level, so "from engines import common" works.
+    # -t . adds the engine directory to the import path. Tests can then import engines.common.
     & $Python -m unittest discover -s tests -t . -v
     $exit = $LASTEXITCODE
 }

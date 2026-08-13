@@ -53,7 +53,7 @@ function Invoke-Worker($request) {
 }
 
 try {
-    # ---- Phase 1: a normal request, with the body in the response JSON ----
+    # Phase 1 returns the body in the response JSON.
     Write-Host "Phase 1: fetching $Url ..." -ForegroundColor Cyan
     $res = Invoke-Worker @{
         url             = $Url
@@ -84,9 +84,8 @@ try {
         throw "Phase 1 failed: a normal request returned no body."
     }
 
-    # ---- Phase 2: the same request with downloadTo, so the body goes to a file ----
-    # downloadPartPath is left out on purpose, so this also checks the worker's own
-    # fallback to <target>.part.
+    # Phase 2 writes the body to a file.
+    # Omit downloadPartPath to test the worker's <target>.part fallback.
     Write-Host ""
     Write-Host "Phase 2: downloading $Url to a file ..." -ForegroundColor Cyan
     $res = Invoke-Worker @{

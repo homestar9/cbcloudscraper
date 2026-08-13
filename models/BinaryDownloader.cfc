@@ -405,9 +405,8 @@ component singleton accessors="true" {
 	 * directoryCreate() because Adobe ColdFusion accepts only the path argument, and Lucee's
 	 * extra arguments make the file fail to compile on Adobe - even on a line that never runs.
 	 *
-	 * FileUtil.cfc holds the shared copy of this method, but tasks/Binary.cfc builds this
-	 * component directly from CommandBox, where WireBox cannot inject anything. So this
-	 * component keeps its own copy and takes no dependencies.
+	 * FileUtil.cfc has the shared version of this method. CommandBox builds this component without
+	 * WireBox, so FileUtil cannot be injected here. Keep this local version to avoid that dependency.
 	 */
 	private boolean function makeDirectory( required string path ){
 		if ( directoryExists( arguments.path ) ) {

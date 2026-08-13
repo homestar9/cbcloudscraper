@@ -1,6 +1,4 @@
-"""Unit tests for the cbcloudscraper worker.
+"""Make this test directory importable by unittest discover.
 
-This file only makes the directory a package so `unittest discover` can find it while
-the engine directory stays the top level. Nothing imports this package outside of a
-test run, so PyInstaller never bundles it.
+Only the test runner imports this package. PyInstaller does not include it in the worker.
 """

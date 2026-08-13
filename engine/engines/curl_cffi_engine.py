@@ -34,8 +34,7 @@ def fetch(request, cookies):
     proxy = request.get("proxy") or ""
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
-    # Stream only when the caller wants the body written to a file. Streaming keeps the
-    # whole body out of memory, which is the point of the downloadTo option.
+    # Stream file downloads so the full body is not stored in memory.
     download_wanted = bool((request.get("downloadto") or "").strip())
 
     response = session.request(
@@ -52,19 +51,17 @@ def fetch(request, cookies):
     )
 
     try:
-        # curl_cffi ignores chunk_size and warns when it is passed, so do not pass one.
+        # curl_cffi ignores chunk_size and logs a warning when it is passed.
         chunks = response.iter_content() if download_wanted else None
         outcome = receive_body(response, request, chunks)
     finally:
         if download_wanted:
-            # In stream mode curl_cffi runs the transfer on a background thread and
-            # holds a duplicated curl handle. close() stops that thread and releases
-            # the handle. Without it this program can hang on its way out.
+            # In stream mode, close() stops curl_cffi's transfer thread and releases
+            # its copied curl handle. Without close(), the worker may not exit.
             response.close()
 
     content_type = response.headers.get("Content-Type", "") if response.headers else ""
-    # Detect the character set from the peek, because the body is empty after a
-    # download was written to disk.
+    # A file download has an empty body, so detect its character set from the saved first chunk.
     charset = detect_charset(
         content_type,
         outcome["head"] or outcome["body"],

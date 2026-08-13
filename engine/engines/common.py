@@ -4,28 +4,26 @@ These functions normalize what the underlying HTTP libraries return into the pla
 data shapes the worker writes to the response file: a charset string, a list of
 header dictionaries, and a list of cookie dictionaries.
 
-This module also holds the download logic. When the request carries a "downloadto"
-path, receive_body() writes the response body to that path in chunks instead of
-returning it in memory, which is what makes a large download cheap.
+This module also handles file downloads. When a request has a "downloadto" path,
+receive_body() writes the response body to that file instead of returning it in memory.
 """
 import os
 import re
 
-# How many bytes are read at a time while writing a download to disk.
+# Number of bytes in each download chunk.
 CHUNK_BYTES = 65536
 
-# How many bytes are read before deciding whether the body may be written. This is
-# the "peek": it is enough to find a Cloudflare challenge marker and enough to detect
-# the character set from a <meta charset> tag.
+# Read this many bytes before deciding whether to save the response. This preview is
+# also used to find Cloudflare challenge markers and HTML character sets.
 PEEK_BYTES = 65536
 
-# How much of the body is kept in memory when a download is refused, so the caller
-# can see the error page.
+# Return at most this many bytes when a response cannot be saved. This lets the caller
+# inspect an error page without keeping the full page in memory.
 ERROR_PREVIEW_BYTES = 65536
 
-# Text found near the top of a Cloudflare interstitial page. main.py uses this list to
-# decide whether to try the next engine, and receive_body() uses it to decide whether a
-# body may be written to the caller's file.
+# Text that may appear near the start of a Cloudflare challenge page. main.py uses these
+# markers to decide whether to try another engine. receive_body() uses them to avoid
+# saving a challenge page.
 CHALLENGE_MARKERS = (
     "just a moment",
     "cf-challenge",
@@ -40,11 +38,10 @@ CHALLENGE_STATUSES = (403, 429, 503)
 
 
 def as_bool(value, default):
-    """Return a real boolean for a value that came out of the request JSON.
+    """Convert a request JSON value to a boolean.
 
-    A CFML engine can serialize a boolean as the string "false", and Python's
-    bool("false") is True. Read strings by name instead, and fall back to ``default``
-    when the key was missing (value is None) or the text is not recognized.
+    A CFML engine may send a boolean as text. Python treats every non-empty string as
+    true, including "false". Return ``default`` for a missing or unknown value.
     """
     if value is None:
         return default
@@ -158,36 +155,32 @@ def cookiejar_to_list(cookie_container):
     return out
 
 
-# ----------------------------------------------------------------------------------
-# Downloading the body to a file
-# ----------------------------------------------------------------------------------
+# File download helpers
 
 
 def head_has_challenge_marker(head_bytes):
     """Return True when the start of a body contains a Cloudflare challenge marker."""
     try:
         head = (head_bytes or b"")[:4096].decode("utf-8", "ignore").lower()
-    except Exception:  # noqa: BLE001 - a body that cannot be read is not a challenge
+    except Exception:  # noqa: BLE001 - unreadable bytes do not prove this is a challenge
         return False
     return any(marker in head for marker in CHALLENGE_MARKERS)
 
 
 def receive_body(response, request, chunks=None):
-    """Return the response body, writing it to a file when the request asked for that.
+    """Read the response body and save it when the request has a download path.
 
-    Returns a dict with four keys:
+    The returned dict has four keys:
 
-        body          the bytes to send back to CFML (empty after a file was written)
-        head          the first PEEK_BYTES of the body, for character set detection
-        downloadedTo  the target path when a file was written, "" when not
-        bytesWritten  how many bytes went into that file, 0 when none did
+        body          Bytes returned to CFML. Empty after the file is saved.
+        head          First PEEK_BYTES. Used to detect the character set.
+        downloadedTo  Saved file path. Empty when no file was saved.
+        bytesWritten  Number of saved bytes. Zero when no file was saved.
 
-    Without a "downloadto" path in the request this returns the whole body in memory,
-    which is what every request did before the download option existed.
+    Without "downloadto", the whole body is returned in memory.
 
-    ``chunks`` is an iterator of byte chunks. Each engine builds its own, because the
-    two HTTP libraries do not chunk the same way: curl_cffi ignores a chunk size, and
-    requests defaults to one byte per chunk.
+    ``chunks`` provides pieces of the response body. Each engine creates this iterator
+    because its HTTP library has different rules for chunk sizes.
     """
     target = (request.get("downloadto") or "").strip()
     if not target:
@@ -213,15 +206,15 @@ def receive_body(response, request, chunks=None):
 
     parent = os.path.dirname(target)
     if parent:
-        # CFML already created this directory. Doing it here too keeps the worker
-        # usable on its own, which is how build\smoke-test.ps1 runs it.
+        # CFML creates this directory before it starts the worker. Create it here too
+        # so the worker can run by itself.
         os.makedirs(parent, exist_ok=True)
 
     written = _write_stream(part_path, head, chunks)
     try:
         _check_length(response, written)
-        # The part file sits beside the target, so this rename stays on one volume
-        # and is atomic. A half-written file never appears at the target path.
+        # The part file is next to the target. os.replace() can rename it atomically,
+        # so the target never contains a partial download.
         os.replace(part_path, target)
     except BaseException:
         _remove_quietly(part_path)
@@ -245,16 +238,16 @@ def _read_head(chunks):
 
 
 def _may_write(response, request, status, head):
-    """Return True when this response is allowed to land on the caller's file.
+    """Return whether this response can replace the target file.
 
-    A Cloudflare challenge page is never written, whatever downloadOnlyOn2xx says. Two
-    reasons: main.py needs the body in memory so it can try the next engine, and a
-    block page must never overwrite a good file the caller downloaded earlier.
+    Never save a Cloudflare challenge page. Keeping the page in memory lets main.py try
+    another engine. It also protects an existing target file. The downloadonlyon2xx
+    option controls other HTTP error responses.
     """
     server = ""
     try:
         server = (response.headers.get("Server") or "").lower()
-    except Exception:  # noqa: BLE001 - a missing header container is not Cloudflare
+    except Exception:  # noqa: BLE001 - missing headers do not prove this is Cloudflare
         server = ""
 
     if "cloudflare" in server:
@@ -268,10 +261,9 @@ def _may_write(response, request, status, head):
 
 
 def _write_stream(part_path, head, chunks):
-    """Write the peek and the rest of the body to the part file. Return the byte count.
+    """Write the saved first bytes and remaining chunks to the part file.
 
-    Deletes the part file and re-raises on any error, so a failed engine leaves nothing
-    behind before the next engine tries.
+    Return the number of bytes written. Delete the part file if the write fails.
     """
     written = 0
     try:
@@ -292,17 +284,17 @@ def _write_stream(part_path, head, chunks):
 
 
 def _check_length(response, written):
-    """Raise when Content-Length and the number of bytes written disagree.
+    """Raise when an uncompressed Content-Length does not match the saved file.
 
-    A truncated download must fail loudly instead of writing a short file over a good
-    one. The check is skipped when the body arrived compressed, because both HTTP
-    libraries decompress it while Content-Length reports the compressed size.
+    A mismatch means that the download may be incomplete. Skip this check for compressed
+    responses because the HTTP libraries decompress the body before it is saved.
+    Content-Length still reports the compressed size.
     """
     try:
         headers = response.headers
         encoding = (headers.get("Content-Encoding") or "").strip().lower()
         raw_length = headers.get("Content-Length")
-    except Exception:  # noqa: BLE001 - without headers there is nothing to compare
+    except Exception:  # noqa: BLE001 - no readable headers means no length to compare
         return
 
     if encoding and encoding != "identity":
@@ -324,7 +316,7 @@ def _check_length(response, written):
 
 
 def _remove_quietly(path):
-    """Delete a file and ignore any error, so cleanup never hides the real problem."""
+    """Delete a file without replacing the original error with a cleanup error."""
     try:
         os.remove(path)
     except OSError:

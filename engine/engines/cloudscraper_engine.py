@@ -48,11 +48,9 @@ def fetch(request, cookies):
     proxy = request.get("proxy") or ""
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
-    # This engine deliberately does not ask for a streamed response. cloudscraper reads
-    # resp.text on every response to look for a challenge, which loads the whole body
-    # into memory before this code ever sees it. Asking for a stream would save nothing
-    # and would only put the challenge-solving path at risk. Writing the body to a file
-    # still skips the base64 encoding, the JSON round trip, and both CFML decodes.
+    # cloudscraper reads response.text while checking for a challenge. This loads the
+    # full body into memory even when streaming is enabled. A file download still avoids
+    # base64 encoding and extra copies in CFML.
     download_wanted = bool((request.get("downloadto") or "").strip())
 
     response = scraper.request(
@@ -66,14 +64,12 @@ def fetch(request, cookies):
         proxies=proxies,
     )
 
-    # iter_content() on a response that was already read hands back slices of the bytes
-    # it kept, so the shared download code works here without a special case. The chunk
-    # size matters: requests defaults it to one byte.
+    # The body is already in memory. iter_content() splits those bytes into chunks for
+    # receive_body(). Set a chunk size because requests defaults to one byte.
     chunks = response.iter_content(chunk_size=CHUNK_BYTES) if download_wanted else None
     outcome = receive_body(response, request, chunks)
 
-    # Detect the character set from the peek, because the body is empty after a
-    # download was written to disk.
+    # A file download has an empty body, so detect its character set from the saved first chunk.
     charset = detect_charset(
         response.headers.get("Content-Type", ""),
         outcome["head"] or outcome["body"],

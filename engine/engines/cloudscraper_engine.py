@@ -14,7 +14,14 @@ import base64
 
 import cloudscraper25 as cloudscraper
 
-from .common import cookiejar_to_list, detect_charset, headers_to_list
+from .common import (
+    CHUNK_BYTES,
+    as_bool,
+    cookiejar_to_list,
+    detect_charset,
+    headers_to_list,
+    receive_body,
+)
 
 NAME = "cloudscraper"
 
@@ -41,20 +48,32 @@ def fetch(request, cookies):
     proxy = request.get("proxy") or ""
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
+    # cloudscraper reads response.text while checking for a challenge. This loads the
+    # full body into memory even when streaming is enabled. A file download still avoids
+    # base64 encoding and extra copies in CFML.
+    download_wanted = bool((request.get("downloadto") or "").strip())
+
     response = scraper.request(
         (request.get("method") or "GET").upper(),
         request["url"],
         headers=request.get("headers") or {},
         data=data,
         timeout=request.get("timeoutseconds") or 30,
-        verify=request.get("verifyssl", True),
-        allow_redirects=request.get("followredirects", True),
+        verify=as_bool(request.get("verifyssl"), True),
+        allow_redirects=as_bool(request.get("followredirects"), True),
         proxies=proxies,
     )
 
-    body = response.content or b""
+    # The body is already in memory. iter_content() splits those bytes into chunks for
+    # receive_body(). Set a chunk size because requests defaults to one byte.
+    chunks = response.iter_content(chunk_size=CHUNK_BYTES) if download_wanted else None
+    outcome = receive_body(response, request, chunks)
+
+    # A file download has an empty body, so detect its character set from the saved first chunk.
     charset = detect_charset(
-        response.headers.get("Content-Type", ""), body, request.get("defaultcharset", "utf-8")
+        response.headers.get("Content-Type", ""),
+        outcome["head"] or outcome["body"],
+        request.get("defaultcharset", "utf-8"),
     )
 
     return {
@@ -65,7 +84,9 @@ def fetch(request, cookies):
         "engineUsed": NAME,
         "headers": headers_to_list(response),
         "cookies": cookiejar_to_list(scraper.cookies),
-        "bodyBytes": body,
+        "bodyBytes": outcome["body"],
         "bodyCharset": charset,
+        "downloadedTo": outcome["downloadedTo"],
+        "bytesWritten": outcome["bytesWritten"],
         "error": None,
     }

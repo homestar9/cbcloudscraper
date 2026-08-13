@@ -8,7 +8,7 @@ import base64
 
 from curl_cffi import requests as cc_requests
 
-from .common import cookiejar_to_list, detect_charset, headers_to_list
+from .common import as_bool, cookiejar_to_list, detect_charset, headers_to_list, receive_body
 
 NAME = "curl_cffi"
 
@@ -34,6 +34,9 @@ def fetch(request, cookies):
     proxy = request.get("proxy") or ""
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
+    # Stream file downloads so the full body is not stored in memory.
+    download_wanted = bool((request.get("downloadto") or "").strip())
+
     response = session.request(
         (request.get("method") or "GET").upper(),
         request["url"],
@@ -41,14 +44,29 @@ def fetch(request, cookies):
         data=data,
         impersonate=impersonate,
         timeout=request.get("timeoutseconds") or 30,
-        verify=request.get("verifyssl", True),
-        allow_redirects=request.get("followredirects", True),
+        verify=as_bool(request.get("verifyssl"), True),
+        allow_redirects=as_bool(request.get("followredirects"), True),
         proxies=proxies,
+        stream=download_wanted,
     )
 
-    body = response.content or b""
+    try:
+        # curl_cffi ignores chunk_size and logs a warning when it is passed.
+        chunks = response.iter_content() if download_wanted else None
+        outcome = receive_body(response, request, chunks)
+    finally:
+        if download_wanted:
+            # In stream mode, close() stops curl_cffi's transfer thread and releases
+            # its copied curl handle. Without close(), the worker may not exit.
+            response.close()
+
     content_type = response.headers.get("Content-Type", "") if response.headers else ""
-    charset = detect_charset(content_type, body, request.get("defaultcharset", "utf-8"))
+    # A file download has an empty body, so detect its character set from the saved first chunk.
+    charset = detect_charset(
+        content_type,
+        outcome["head"] or outcome["body"],
+        request.get("defaultcharset", "utf-8"),
+    )
 
     return {
         "ok": True,
@@ -58,7 +76,9 @@ def fetch(request, cookies):
         "engineUsed": NAME,
         "headers": headers_to_list(response),
         "cookies": cookiejar_to_list(session.cookies),
-        "bodyBytes": body,
+        "bodyBytes": outcome["body"],
         "bodyCharset": charset,
+        "downloadedTo": outcome["downloadedTo"],
+        "bytesWritten": outcome["bytesWritten"],
         "error": None,
     }

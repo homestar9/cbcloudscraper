@@ -232,6 +232,9 @@ var result = scraper.get(
 | `proxy` | `""` | Sends the request through this proxy URL. An empty string means no proxy. |
 | `useCookieCache` | `true` | Uses stored cookies for this request when the module cookie cache is enabled. |
 | `throwOnError` | `false` | Throws on an operational failure instead of returning `ok=false`. |
+| `downloadTo` | `""` | Writes the response body to this file instead of returning it in memory. Must be a full path. See [Download a large file](#download-a-large-file). |
+| `downloadOnlyOn2xx` | `true` | With `downloadTo`, writes the file only when the status is 2xx. Set `false` to write an error page too, the way `cfhttp` does. |
+| `decodeText` | `true` | Set `false` to skip decoding the body into `fileContent`. Use this for images, PDFs, and other binary responses you read through `fileContentAsBinary`. |
 
 The module settings provide these defaults. See [Configuration](#configuration) to change them
 for every request.
@@ -259,19 +262,91 @@ Both request methods return the same struct.
 | `ok` | `true` when an HTTP response was received. `false` when an operational failure stopped the request. |
 | `statusCode` | The HTTP status code as a **number**, such as `200`. This differs from `cfhttp`, which returns a string such as `"200 OK"`. The value is `0` when `ok` is false. |
 | `statusText` | The HTTP status reason, such as `OK` or `Not Found`. |
-| `fileContent` | The response body decoded as text. |
-| `fileContentAsBinary` | The response body as raw bytes. Use this value for images, PDFs, and other binary files. This value is always a byte array; it has zero length when `ok` is false. |
+| `fileContent` | The response body decoded as text. This is an empty string when the body went to a file, and when `decodeText` was `false`. |
+| `fileContentAsBinary` | The response body as raw bytes. Use this value for images, PDFs, and other binary files. This value is always a byte array; it has zero length when `ok` is false and when the body went to a file. |
 | `charset` | The character set used to decode `fileContent`. |
 | `headers` | A case-insensitive struct of response headers. The last value wins when a header appears more than once. |
 | `rawHeaders` | An array of `{name, value}` structs. This array keeps repeated headers such as `Set-Cookie`. |
 | `cookies` | An array of cookies returned by the request engine. |
 | `finalUrl` | The final URL after redirects. |
 | `engineUsed` | The engine that returned the response: `curl_cffi` or `cloudscraper`. |
+| `downloadedTo` | The path of the file that was written, when you used `downloadTo`. Empty in every other case, including when a download was skipped. |
+| `bytesWritten` | How many bytes went into that file. `0` when no file was written. |
 | `executionTime` | The total request time measured by CFML, in milliseconds. |
 | `errorDetail` | A description of the operational failure. This value is empty when `ok` is true. |
 
 `throwOnError=true` changes only operational failures. HTTP responses such as `404` and `503`
 still return a result struct.
+
+## Download a large file
+
+Set the `downloadTo` option to a full file path. The helper writes the response body straight to
+that path, a piece at a time, so the whole body is never held in memory at once.
+
+```cfc
+var result = scraper.get(
+    url     = "https://example.com/licenses.csv",
+    options = { downloadTo : "C:/data/licenses.csv" }
+);
+
+if ( result.ok && len( result.downloadedTo ) ) {
+    writeOutput( "Saved #result.bytesWritten# bytes to #result.downloadedTo#" );
+}
+```
+
+Without this option, a response body is copied several times before your code sees it: the helper
+holds the whole body in memory, base64-encodes it into a file on disk, and CFML reads that file
+back, decodes the bytes, and builds a text copy on top. For a 12 MB file that costs about 60 MB of
+short-lived heap. With `downloadTo`, none of those copies happen.
+
+**The path must be absolute.** A relative path means something different on each CFML engine and
+operating system, so the module rejects it and throws `cbcloudscraper.InvalidOption`. Call
+`expandPath()` yourself if you need to turn an application-relative path into a full one. Missing
+parent directories are created for you.
+
+**The timeout default is higher.** A request with `downloadTo` uses the `defaultDownloadTimeout`
+setting (300 seconds) instead of `defaultTimeout` (30 seconds). An explicit `timeout` option still
+wins over both. With `downloadTo`, the `timeout` value stops meaning "total time for the request."
+It becomes the time allowed to connect, and the time the transfer may sit stalled before it gives
+up. A large download is not stopped just for being large. The module still stops the helper
+process 5 seconds after the timeout, so that number is the real ceiling on how long one request
+can run.
+
+**A long download holds a process slot the whole time.** The `maxConcurrentProcesses` setting
+limits how many helper processes run at once. A 5 minute download occupies one of those slots for
+5 minutes, so other requests can fail with `cbcloudscraper.Busy` once they wait longer than
+`acquireTimeout`. Raise `maxConcurrentProcesses`, or run large downloads on a schedule when the
+application is quiet.
+
+**Nothing is written unless the response is good.** By default the target file is only replaced
+when the site returns a 2xx status. A 404 or a 500 leaves the existing file untouched,
+`downloadedTo` is empty, and the error page comes back in `fileContent` so you can see what the
+site said. Up to 64 KB of it is kept. Set `downloadOnlyOn2xx : false` to write the file for any
+status, the way `cfhttp` does.
+
+**A Cloudflare block page is never written to your file.** This holds even with
+`downloadOnlyOn2xx : false`. The helper checks the start of the body before it writes anything, and
+a block page is returned in memory instead so the next engine can try. Without this rule, a
+nightly job could replace yesterday's good file with an HTML error page.
+
+**The in-progress file.** While the download runs, the helper writes to a file named
+`<your path>.cbcs-<id>.part` in the same directory as your target, then renames it onto the target
+when the download finishes whole. Two things follow from that. Your target file is never half
+written. And the module needs write access to the target's directory, not just to the file. If a
+download fails, the module deletes the in-progress file. If the whole CFML process is killed
+mid-download, the file is left behind, and the next download to the same target removes it once it
+is over an hour old.
+
+**A truncated download fails.** If the site sends a `Content-Length` header and fewer bytes
+arrive, the helper reports an error and your target file is not touched. The module then tries the
+next engine.
+
+**An out-of-date helper still works.** A helper program older than this module does not know about
+`downloadTo`, so it returns the whole body the old way. The module notices, writes the file itself,
+and logs a warning. Your code sees the same result either way, but none of the memory savings
+apply. On that path the file is only written for a 2xx status, whatever `downloadOnlyOn2xx` says,
+because CFML cannot tell a Cloudflare block page from a real response the way the helper can.
+Update the helper to get the savings back.
 
 ## Install or update the helper before a request
 
@@ -450,6 +525,8 @@ Add overrides under `moduleSettings.cbcloudscraper` in your application's
 | `binaryReleaseTag` | `""` | Overrides the release tag used for the helper. An empty string uses `v` followed by the module version. |
 | `verifyChecksum` | `true` | Checks the downloaded ZIP file against its published SHA-256 checksum when the checksum is available. |
 | `defaultTimeout` | `30` | Sets the default HTTP timeout in seconds. |
+| `defaultDownloadTimeout` | `300` | Used instead of `defaultTimeout` when a request sets `downloadTo` and does not set its own `timeout`. |
+| `downloadOnlyOn2xx` | `true` | Sets the module-wide default for the `downloadOnlyOn2xx` request option. |
 | `defaultEngine` | `"auto"` | Sets the default request engine. Valid values are `auto`, `curl_cffi`, and `cloudscraper`. |
 | `impersonate` | `"chrome"` | Sets the default browser fingerprint for `curl_cffi`. |
 | `followRedirects` | `true` | Sets whether requests follow HTTP redirects. |
@@ -495,7 +572,16 @@ been built.
 box install
 cd test-harness && box install && cd ..
 box server start serverConfigFile=server-lucee@5.json
-box testbox run
+box run-script test
+```
+
+The helper program has its own unit tests, written with Python's built-in `unittest`. They cover
+the download logic and need no network connection and no built binary, so they are the fastest way
+to check a change in `engine/`. They do need the virtual environment that `build\build-binary.ps1`
+creates.
+
+```bash
+box run-script test:python
 ```
 
 See [RELEASE.md](RELEASE.md) for binary build and release instructions.

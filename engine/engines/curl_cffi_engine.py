@@ -8,7 +8,7 @@ import base64
 
 from curl_cffi import requests as cc_requests
 
-from .common import cookiejar_to_list, detect_charset, headers_to_list
+from .common import as_bool, cookiejar_to_list, detect_charset, headers_to_list, receive_body
 
 NAME = "curl_cffi"
 
@@ -34,6 +34,10 @@ def fetch(request, cookies):
     proxy = request.get("proxy") or ""
     proxies = {"http": proxy, "https": proxy} if proxy else None
 
+    # Stream only when the caller wants the body written to a file. Streaming keeps the
+    # whole body out of memory, which is the point of the downloadTo option.
+    download_wanted = bool((request.get("downloadto") or "").strip())
+
     response = session.request(
         (request.get("method") or "GET").upper(),
         request["url"],
@@ -41,14 +45,31 @@ def fetch(request, cookies):
         data=data,
         impersonate=impersonate,
         timeout=request.get("timeoutseconds") or 30,
-        verify=request.get("verifyssl", True),
-        allow_redirects=request.get("followredirects", True),
+        verify=as_bool(request.get("verifyssl"), True),
+        allow_redirects=as_bool(request.get("followredirects"), True),
         proxies=proxies,
+        stream=download_wanted,
     )
 
-    body = response.content or b""
+    try:
+        # curl_cffi ignores chunk_size and warns when it is passed, so do not pass one.
+        chunks = response.iter_content() if download_wanted else None
+        outcome = receive_body(response, request, chunks)
+    finally:
+        if download_wanted:
+            # In stream mode curl_cffi runs the transfer on a background thread and
+            # holds a duplicated curl handle. close() stops that thread and releases
+            # the handle. Without it this program can hang on its way out.
+            response.close()
+
     content_type = response.headers.get("Content-Type", "") if response.headers else ""
-    charset = detect_charset(content_type, body, request.get("defaultcharset", "utf-8"))
+    # Detect the character set from the peek, because the body is empty after a
+    # download was written to disk.
+    charset = detect_charset(
+        content_type,
+        outcome["head"] or outcome["body"],
+        request.get("defaultcharset", "utf-8"),
+    )
 
     return {
         "ok": True,
@@ -58,7 +79,9 @@ def fetch(request, cookies):
         "engineUsed": NAME,
         "headers": headers_to_list(response),
         "cookies": cookiejar_to_list(session.cookies),
-        "bodyBytes": body,
+        "bodyBytes": outcome["body"],
         "bodyCharset": charset,
+        "downloadedTo": outcome["downloadedTo"],
+        "bytesWritten": outcome["bytesWritten"],
         "error": None,
     }

@@ -26,7 +26,7 @@ Test the module against your real target site before you depend on it in product
 ## Requirements
 
 - ColdBox 8
-- Lucee 5 or 6, Adobe ColdFusion 2023 or 2025, or BoxLang
+- Lucee 6+, Adobe ColdFusion 2023 or 2025, or BoxLang
 - Windows (for now)
 
 The project currently publishes only a Windows version of the required binary. If you want to help me test with Linux or MacOS, please contact me.
@@ -571,7 +571,7 @@ been built.
 ```bash
 box install
 cd test-harness && box install && cd ..
-box server start serverConfigFile=server-lucee@5.json
+box run-script start:lucee6
 box run-script test
 ```
 

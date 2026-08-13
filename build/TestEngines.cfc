@@ -28,7 +28,7 @@ component {
 				"No engines are listed in build/build.json.",
 				[
 					'"engines": [',
-					'    { "name": "Lucee 5",    "configFile": "server-lucee@5.json" },',
+					'    { "name": "Lucee 6",    "configFile": "server-lucee@6.json" },',
 					'    { "name": "Adobe 2023", "configFile": "server-adobe@2023.json" }',
 					']',
 					"",

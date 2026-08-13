@@ -125,14 +125,14 @@ The script performs these actions:
 
 1. Builds the Windows helper.
 2. Creates its ZIP file and SHA-256 checksum.
-3. Starts the Lucee 5 test server.
+3. Starts the Adobe 2023 test server.
 4. Runs the tests and builds the CFML package.
 5. Publishes the module to ForgeBox.
 6. Creates and pushes tag `v1.0.0`.
 7. Creates the GitHub Release.
 8. Uploads the helper ZIP file and checksum.
 
-The Lucee test server may remain running after the release finishes.
+The Adobe 2023 test server may remain running after the release finishes.
 
 ## Verify what users will install
 
@@ -216,7 +216,7 @@ normally uses `bump:patch`. Finish the hotfix into both `master` and `develop` b
 | ForgeBox published, but the tag or GitHub Release was not created. | Run the matching `build/Release.cfc` recovery command below. Do not run the full release again. |
 | The command reports `Tag v1.1.0 already exists`. | Use `-ExistingTag` if GitKraken created the tag and it points to the current commit. Otherwise, check whether the version was already released. |
 | The command reports uncommitted changes. | Review and commit or stash them. The release will not publish from a dirty working tree. |
-| The tests report no answer from the server. | Start it with `box run-script start:lucee`. |
+| The tests report no answer from the server. | Start it with `box run-script start:2023`. |
 | The binary build changed `engine/requirements.lock.txt`. | Review and commit the lock file, then run the release again from a clean working tree. |
 
 If only the helper upload failed, replace `v1.1.0` with the release tag and run:

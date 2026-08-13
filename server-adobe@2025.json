@@ -21,6 +21,9 @@
         "javaVersion":"openjdk21_jre"
     },
     "openBrowser":"false",
+    "fusionreactor":{
+        "enable":"false"
+    },
     "cfconfig":{
         "file":".cfconfig.json"
     },

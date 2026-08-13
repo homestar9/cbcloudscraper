@@ -63,11 +63,6 @@ component singleton {
 		var process = builder.start();
 
 		// Start with the result values for a timeout. Replace them if the process finishes normally.
-		//
-		// The return statement must stay after the try/finally block. Lucee 5 fails to compile this
-		// method when the return is inside the try block and the finally block contains another
-		// try/catch. Lucee reports the compiler failure as a NullPointerException without a line
-		// number.
 		var exitCode = -1;
 		var timedOut = true;
 

@@ -443,7 +443,7 @@ component {
 			throw(
 				type    = "BuildConfig",
 				message = "build.json engines must be an array like "
-					& "[ { ""name"": ""Lucee 5"", ""configFile"": ""server-lucee@5.json"" } ]."
+					& "[ { ""name"": ""Lucee 6"", ""configFile"": ""server-lucee@6.json"" } ]."
 			);
 		}
 		for ( var engine in arguments.settings.engines ) {
@@ -451,7 +451,7 @@ component {
 				throw(
 					type    = "BuildConfig",
 					message = "Every entry in build.json engines needs a configFile, for example "
-						& "{ ""name"": ""Lucee 5"", ""configFile"": ""server-lucee@5.json"" }."
+						& "{ ""name"": ""Lucee 6"", ""configFile"": ""server-lucee@6.json"" }."
 				);
 			}
 		}

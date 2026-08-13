@@ -17,6 +17,9 @@
         }
     },
     "openBrowser":"false",
+    "fusionreactor":{
+        "enable":"false"
+    },
     "JVM":{
         "heapSize":"768",
         "javaVersion":"openjdk21_jre"

@@ -49,13 +49,13 @@
 		"format"               : "cfformat run models,tasks,ModuleConfig.cfc,test-harness/tests/ --overwrite",
 		"format:watch"         : "cfformat watch models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
 		"format:check"         : "cfformat check models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
-		"start:lucee"          : "server start serverConfigFile=server-lucee@5.json",
+		"start:lucee6"         : "server start serverConfigFile=server-lucee@6.json",
 		"start:2023"           : "server start serverConfigFile=server-adobe@2023.json",
 		"start:boxlang"        : "server start serverConfigFile=server-boxlang-cfml@1.json",
-		"stop:lucee"           : "server stop serverConfigFile=server-lucee@5.json",
+		"stop:lucee6"          : "server stop serverConfigFile=server-lucee@6.json",
 		"stop:2023"            : "server stop serverConfigFile=server-adobe@2023.json",
 		"stop:boxlang"         : "server stop serverConfigFile=server-boxlang-cfml@1.json",
-		"logs:lucee"           : "server log serverConfigFile=server-lucee@5.json --follow"
+		"logs:lucee6"          : "server log serverConfigFile=server-lucee@6.json --follow"
 	},
 	"testbox" : {
 		"runner" : "http://localhost:60299/tests/runner.cfm"

@@ -38,6 +38,12 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Changed
 
+- Dropped support for Lucee 5, which has reached end of life. The lowest supported Lucee version
+  is now Lucee 6, which is also the default engine for local development.
+- Dropped the plain BoxLang engine from the test matrix. BoxLang is still tested in CFML mode,
+  which is how the module is meant to run there.
+- The release now runs its tests on Adobe ColdFusion 2023 instead of Lucee 5. The full engine
+  matrix still runs on Lucee 6, Adobe 2023, Adobe 2025, and BoxLang CFML.
 - The helper program now writes `downloadedTo` and `bytesWritten` on every response, which is how
   the module tells a current helper from an older one.
 - `build\smoke-test.ps1` runs a second phase that downloads to a file and checks the result.

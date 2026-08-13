@@ -7,6 +7,8 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-12
+
 ### Fixed
 
 - Fixed a compile error that stopped the module from loading on Adobe ColdFusion.

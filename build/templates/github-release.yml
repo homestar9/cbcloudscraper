@@ -42,7 +42,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "11"
+          java-version: "21"
 
       - name: Install CommandBox
         uses: Ortus-Solutions/setup-commandbox@v2.0.1
@@ -53,7 +53,7 @@ jobs:
 
       - name: Start the test server
         run: |
-          box server start serverConfigFile=server-lucee@5.json --!console
+          box server start serverConfigFile=server-adobe@2023.json --!console
           # Wait for the app to answer before running the suite.
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:60299/ || true)

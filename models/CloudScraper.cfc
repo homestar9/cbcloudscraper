@@ -10,6 +10,9 @@
  * still a valid response, so ok remains true and statusCode contains the site's status. A problem
  * running the executable sets ok to false and adds errorDetail. Set options.throwOnError to true
  * when the code should throw these process errors instead.
+ *
+ * Set options.downloadTo to an absolute path to save a large response to a file. The executable
+ * writes the file in chunks. It does not put the body in response JSON or CFML memory.
  */
 component singleton accessors="true" {
 
@@ -17,6 +20,7 @@ component singleton accessors="true" {
 	property name="runner"            inject="ProcessRunner@cbcloudscraper";
 	property name="cookieJar"         inject="CookieJar@cbcloudscraper";
 	property name="binaryProvisioner" inject="BinaryProvisioner@cbcloudscraper";
+	property name="fileUtil"          inject="FileUtil@cbcloudscraper";
 	property name="logger"            inject="logbox:logger:{this}";
 
 	// This semaphore limits how many executable processes can run at once. onDIComplete creates
@@ -57,7 +61,7 @@ component singleton accessors="true" {
 	 * Make a GET request.
 	 *
 	 * @url     The address to fetch.
-	 * @options Optional engine, impersonate, timeout, headers, followRedirects, verifySSL, proxy, useCookieCache, and throwOnError values.
+	 * @options Optional engine, impersonate, timeout, headers, followRedirects, verifySSL, proxy, useCookieCache, throwOnError, downloadTo, downloadOnlyOn2xx, and decodeText values.
 	 */
 	struct function get( required string url, struct options = {} ){
 		return send( buildRequest( arguments.url, "GET", "", arguments.options ) );
@@ -117,6 +121,17 @@ component singleton accessors="true" {
 			jarPath = cookieJar.pathFor( domain );
 		}
 		req[ "cookieJarPath" ] = jarPath;
+
+		// Write each download to a unique .part file next to the target. Keeping both files on the
+		// same volume lets the worker rename the completed file atomically. The UUID keeps two
+		// requests for the same target separate. Use only eight UUID characters to limit path length.
+		var downloadTo = structKeyExists( req, "downloadTo" ) ? req.downloadTo : "";
+		var partPath   = "";
+		if ( len( downloadTo ) ) {
+			partPath = downloadTo & ".cbcs-" & left( replace( uuid, "-", "", "all" ), 8 ) & ".part";
+			sweepDownloadParts( downloadTo );
+		}
+		req[ "downloadPartPath" ] = partPath;
 
 		try {
 			// Find or download the executable. The catch block below reports any setup failure.
@@ -182,7 +197,7 @@ component singleton accessors="true" {
 				);
 			}
 
-			return toResponse( raw, started );
+			return toResponse( raw, started, req );
 		} catch ( any e ) {
 			return failure(
 				req,
@@ -196,6 +211,9 @@ component singleton accessors="true" {
 			}
 			safeDelete( reqPath );
 			safeDelete( resPath );
+			// Delete the .part file if the worker did not rename it. This can happen when a timeout
+			// kills the worker before the worker can clean up.
+			safeDelete( partPath );
 			if ( !( settings.keepFailureLogs ?: false ) ) {
 				safeDelete( logPath );
 			}
@@ -250,15 +268,33 @@ component singleton accessors="true" {
 	){
 		var opts = arguments.options;
 
+		// Resolve downloadTo first because it selects the default timeout.
+		var downloadTo = trim( opt( opts, "downloadTo", "" ) );
+		if ( len( downloadTo ) ) {
+			downloadTo = prepareDownloadTarget( downloadTo );
+		}
+		var fallbackTimeout = len( downloadTo )
+		 ? ( settings.defaultDownloadTimeout ?: 300 )
+		 : settings.defaultTimeout;
+
+		// Check the key directly. Adobe ColdFusion treats false as missing when ?: is used.
+		var onlyOn2xxDefault = structKeyExists( settings, "downloadOnlyOn2xx" )
+		 ? settings.downloadOnlyOn2xx
+		 : true;
+
 		var req = {
-			"url"             : arguments.url,
-			"method"          : uCase( arguments.method ),
-			"headers"         : duplicate( settings.defaultHeaders ?: {} ),
-			"bodyBase64"      : "",
-			"engine"          : opt( opts, "engine", settings.defaultEngine ),
-			"impersonate"     : opt( opts, "impersonate", settings.impersonate ),
-			"timeoutSeconds"  : opt( opts, "timeout", settings.defaultTimeout ),
-			"followRedirects" : opt(
+			"url"               : arguments.url,
+			"method"            : uCase( arguments.method ),
+			"headers"           : duplicate( settings.defaultHeaders ?: {} ),
+			"bodyBase64"        : "",
+			"engine"            : opt( opts, "engine", settings.defaultEngine ),
+			"impersonate"       : opt( opts, "impersonate", settings.impersonate ),
+			"timeoutSeconds"    : opt( opts, "timeout", fallbackTimeout ),
+			"downloadTo"        : downloadTo,
+			"downloadOnlyOn2xx" : opt( opts, "downloadOnlyOn2xx", onlyOn2xxDefault ),
+			// CFML uses this option when it builds the result. The executable ignores it.
+			"decodeText"        : opt( opts, "decodeText", true ),
+			"followRedirects"   : opt(
 				opts,
 				"followRedirects",
 				settings.followRedirects
@@ -282,6 +318,83 @@ component singleton accessors="true" {
 		req.bodyBase64 = encodeBody( arguments.body, req );
 
 		return req;
+	}
+
+	/**
+	 * Validate downloadTo and create its parent directory.
+	 *
+	 * The path must be absolute so CFML and the worker use the same target. Reject invalid paths
+	 * before starting the worker.
+	 *
+	 * @path The caller's downloadTo value.
+	 *
+	 * @return The path with forward slashes.
+	 */
+	private string function prepareDownloadTarget( required string path ){
+		var target = replace( trim( arguments.path ), "\", "/", "all" );
+
+		if ( !reFind( "^([a-zA-Z]:/|//|/)", target ) ) {
+			throw(
+				type    = "cbcloudscraper.InvalidOption",
+				message = "The downloadTo option needs an absolute path.",
+				detail  = "Received '" & arguments.path & "'. Pass a full path such as ""C:/data/file.csv"" or ""/var/data/file.csv"". Use expandPath() to turn an application-relative path into a full one."
+			);
+		}
+
+		if ( directoryExists( target ) ) {
+			throw(
+				type    = "cbcloudscraper.InvalidOption",
+				message = "The downloadTo option needs a file path, not a directory.",
+				detail  = "'" & arguments.path & "' is an existing directory. Include the file name in the path."
+			);
+		}
+
+		var parent = createObject( "java", "java.io.File" ).init( javacast( "string", target ) ).getParent();
+		if ( !isNull( parent ) && len( parent ) ) {
+			fileUtil.makeDirectory( parent );
+		}
+
+		return target;
+	}
+
+	/**
+	 * Delete stale .part files left beside a download target.
+	 *
+	 * send() removes the current .part file after a failed request. A stopped server cannot run
+	 * that cleanup. sweepTempFiles() also misses these files because it checks workingDirectory.
+	 *
+	 * Keep files newer than the cutoff because another download may still use them. Use a cutoff of
+	 * at least one hour because a large download may outlive the normal temporary-file setting.
+	 *
+	 * @target The downloadTo path for the request that is about to start.
+	 */
+	private void function sweepDownloadParts( required string target ){
+		try {
+			var file = createObject( "java", "java.io.File" ).init( javacast( "string", arguments.target ) );
+			var dir  = file.getParent();
+			if ( isNull( dir ) || !len( dir ) || !directoryExists( dir ) ) {
+				return;
+			}
+			var cutoff = dateAdd(
+				"n",
+				-max( settings.tempSweepMinutes ?: 30, 60 ),
+				now()
+			);
+			var rows = directoryList(
+				dir,
+				false,
+				"query",
+				file.getName() & ".cbcs-*.part"
+			);
+			for ( var row in rows ) {
+				if ( row.type == "File" && row.dateLastModified < cutoff ) {
+					safeDelete( dir & "/" & row.name );
+				}
+			}
+		} catch ( any e ) {
+			// A cleanup error must not stop the new download.
+			logger.debug( "cbcloudscraper could not check for leftover download files: " & e.message );
+		}
 	}
 
 	/**
@@ -317,18 +430,34 @@ component singleton accessors="true" {
 
 	/**
 	 * Convert the executable's response into a result shaped like cfhttp output.
+	 *
+	 * @raw     The response struct read from the executable's response file.
+	 * @started The tick count taken when the request began.
+	 * @request The request struct that produced this response.
 	 */
-	private struct function toResponse( required struct raw, required numeric started ){
-		var bodyBytes = binaryDecode( arguments.raw.bodyBase64 ?: "", "base64" );
+	private struct function toResponse(
+		required struct raw,
+		required numeric started,
+		required struct request
+	){
+		var download  = resolveDownload( arguments.raw, arguments.request );
+		var bodyBytes = download.bodyBytes;
 		var charset   = arguments.raw.bodyCharset ?: ( settings.defaultCharset ?: "utf-8" );
 
+		// Do not convert the body to text after a file download or when decodeText is false.
+		// charsetEncode() would create another full copy of the body in memory.
+		var wantsText = !len( download.downloadedTo )
+		&& ( structKeyExists( arguments.request, "decodeText" ) ? arguments.request.decodeText : true );
+
 		var text = "";
-		try {
-			text = charsetEncode( bodyBytes, charset );
-		} catch ( any e ) {
-			// Use UTF-8 when the CFML engine does not support the response's character set.
-			text    = charsetEncode( bodyBytes, "utf-8" );
-			charset = "utf-8";
+		if ( wantsText ) {
+			try {
+				text = charsetEncode( bodyBytes, charset );
+			} catch ( any e ) {
+				// Use UTF-8 when the CFML engine does not support the response's character set.
+				text    = charsetEncode( bodyBytes, "utf-8" );
+				charset = "utf-8";
+			}
 		}
 
 		// Build a case-insensitive header struct for simple lookups. The last duplicate value wins.
@@ -350,8 +479,67 @@ component singleton accessors="true" {
 			"charset"             : charset,
 			"finalUrl"            : arguments.raw.finalUrl ?: "",
 			"engineUsed"          : arguments.raw.engineUsed ?: "",
+			"downloadedTo"        : download.downloadedTo,
+			"bytesWritten"        : download.bytesWritten,
 			"executionTime"       : getTickCount() - arguments.started,
 			"errorDetail"         : ""
+		};
+	}
+
+	/**
+	 * Return the response body or file-download details.
+	 *
+	 * Workers with download support always return a downloadedTo key. Older workers omit that key
+	 * and return the full body as base64. Write that body to the target for backward compatibility.
+	 *
+	 * @raw     The response struct read from the executable's response file.
+	 * @request The request struct that produced this response.
+	 *
+	 * @return A struct with bodyBytes, downloadedTo, and bytesWritten.
+	 */
+	private struct function resolveDownload( required struct raw, required struct request ){
+		var bodyBytes = binaryDecode( arguments.raw.bodyBase64 ?: "", "base64" );
+		var target    = structKeyExists( arguments.request, "downloadTo" ) ? arguments.request.downloadTo : "";
+
+		if ( !len( target ) ) {
+			return {
+				"bodyBytes"    : bodyBytes,
+				"downloadedTo" : "",
+				"bytesWritten" : 0
+			};
+		}
+
+		if ( structKeyExists( arguments.raw, "downloadedTo" ) ) {
+			return {
+				"bodyBytes"    : bodyBytes,
+				"downloadedTo" : arguments.raw.downloadedTo,
+				"bytesWritten" : arguments.raw.bytesWritten ?: 0
+			};
+		}
+
+		// An older worker returned the body to CFML. Write the file here for compatibility.
+		// This path still uses memory for the full body.
+		logger.warn(
+			"cbcloudscraper wrote the downloadTo file itself because the helper executable is older than this module and does not support downloads. Update the helper to get the memory savings. Run CloudScraper.warmup() after clearing the bin directory, or set autoDownloadBinary to true."
+		);
+
+		// Older workers cannot identify a Cloudflare challenge before returning the body to CFML.
+		// Save only 2xx responses so a challenge page cannot replace an existing file.
+		var status = arguments.raw.statusCode ?: 0;
+		if ( status < 200 || status >= 300 ) {
+			return {
+				"bodyBytes"    : bodyBytes,
+				"downloadedTo" : "",
+				"bytesWritten" : 0
+			};
+		}
+
+		fileWrite( target, bodyBytes );
+		return {
+			// Return empty bytes to match the result from a worker with download support.
+			"bodyBytes"    : binaryDecode( "", "base64" ),
+			"downloadedTo" : target,
+			"bytesWritten" : getFileInfo( target ).size
 		};
 	}
 
@@ -384,6 +572,8 @@ component singleton accessors="true" {
 			"charset"             : settings.defaultCharset ?: "utf-8",
 			"finalUrl"            : "",
 			"engineUsed"          : "",
+			"downloadedTo"        : "",
+			"bytesWritten"        : 0,
 			"executionTime"       : getTickCount() - arguments.started,
 			"errorDetail"         : arguments.detail
 		};

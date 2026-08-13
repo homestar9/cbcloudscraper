@@ -1,5 +1,5 @@
 {
-	"name":"cbcloudscraper-boxlang-cfml@1",
+    "name":"cbcloudscraper-boxlang-cfml@1",
     "app":{
         "serverHomeDirectory":".engine/boxlang-cfml",
         "cfengine":"boxlang@1"
@@ -11,8 +11,8 @@
         "rewrites":{
             "enable":"true"
         },
-		"webroot": "test-harness",
-		"aliases":{
+        "webroot":"test-harness",
+        "aliases":{
             "/moduleroot/cbcloudscraper":"../"
         }
     },
@@ -21,12 +21,14 @@
         "javaVersion":"openjdk21_jre",
         "args":"-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=8888"
     },
-	"openBrowser":"false",
+    "openBrowser":"false",
+    "fusionreactor":{
+        "enable":"false"
+    },
     "cfconfig":{
         "file":".cfconfig.json"
     },
-    "env":{
-    },
+    "env":{},
     "scripts":{
         "onServerInitialInstall":"install bx-compat-cfml --noSave"
     }

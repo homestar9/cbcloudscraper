@@ -7,6 +7,60 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-13
+
+### Added
+
+- Added a `downloadTo` request option that writes a response body straight to a file. The helper
+  program writes the body to the path you give it a piece at a time, so the whole body is never
+  held in memory at once. Without this option, a body is
+  copied several times before your code sees it: the helper holds all of it in memory,
+  base64-encodes it into a file on disk, and CFML reads that file back, decodes the bytes, and
+  builds a text copy on top. For a 12 MB file that costs about 60 MB of short-lived heap. With
+  `downloadTo`, none of those copies happen. This needs the 1.1.0 helper program; an older helper
+  still works, but the module has to write the file itself and the savings do not apply.
+- Added a `downloadOnlyOn2xx` request option, default `true`. The target file is replaced only when
+  the site returns a 2xx status, so an error page cannot overwrite a file that downloaded
+  successfully on an earlier run. Set it to `false` for `cfhttp` behavior. A Cloudflare block page
+  is never written to the target file, whatever this option says.
+- Added `downloadedTo` and `bytesWritten` to the result struct. Both are present on every result,
+  including failures, so the shape stays the same.
+- Added a `decodeText` request option, default `true`. Set it to `false` to skip building the text
+  copy of the body in `fileContent`. This is for callers that read an image, a PDF, or any other
+  binary response through `fileContentAsBinary`, where the text copy can double the heap cost for
+  nothing.
+- Added a `defaultDownloadTimeout` module setting, default 300 seconds. It replaces `defaultTimeout`
+  when a request sets `downloadTo` and does not set its own `timeout`.
+- Added a `downloadOnlyOn2xx` module setting so an application can change the default for every
+  request instead of passing the option on every call.
+- Added `test` and `test:python` scripts to `box.json`.
+- Added unit tests for the helper program in `engine/tests/`, using Python's built-in `unittest`.
+  They cover the download logic and need no network connection and no built binary. Run them with
+  `box run-script test:python`.
+
+### Changed
+
+- Dropped support for Lucee 5, which has reached end of life. The lowest supported Lucee version
+  is now Lucee 6, which is also the default engine for local development.
+- Dropped the plain BoxLang engine from the test matrix. BoxLang is still tested in CFML mode,
+  which is how the module is meant to run there.
+- The release now runs its tests on Adobe ColdFusion 2023 instead of Lucee 5. The full engine
+  matrix still runs on Lucee 6, Adobe 2023, Adobe 2025, and BoxLang CFML.
+- The helper program now writes `downloadedTo` and `bytesWritten` on every response, which is how
+  the module tells a current helper from an older one.
+- `build\smoke-test.ps1` runs a second phase that downloads to a file and checks the result.
+- Moved the shared `makeDirectory()` helper into a new `FileUtil` model. `CookieJar` and
+  `CloudScraper` use it. `ModuleConfig.cfc` and `BinaryDownloader.cfc` keep their own copies,
+  because `onLoad()` runs before models exist and the CommandBox task builds `BinaryDownloader`
+  without WireBox.
+
+### Fixed
+
+- The helper program now reads the `verifySSL` and `followRedirects` request values by name instead
+  of passing them straight to Python. A CFML engine that serialized a boolean as the text `"false"`
+  would have turned it into `true`, because Python treats any non-empty text as true. No supported
+  engine does this today, so nothing was broken in practice.
+
 ## [1.0.1] - 2026-08-12
 
 ### Fixed

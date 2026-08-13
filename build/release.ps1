@@ -70,8 +70,9 @@ $Tag     = "v$Version"
 Push-Location $RepoRoot
 try {
     # ── 2. Start the test server the kit uses to run the suite during release ──
-    Write-Host "Starting the Lucee test server..." -ForegroundColor Cyan
-    box server start serverConfigFile=server-lucee@5.json --noSaveSettings | Out-Null
+    # Adobe 2023 is the engine used in production, so the release runs its tests there.
+    Write-Host "Starting the Adobe 2023 test server..." -ForegroundColor Cyan
+    box server start serverConfigFile=server-adobe@2023.json --noSaveSettings | Out-Null
 
     # ── 3. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
     # release:existing-tag skips tag creation and the branch push, because the tag is already

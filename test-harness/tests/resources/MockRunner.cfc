@@ -9,19 +9,26 @@
  * The mock saves the request written by CloudScraper and writes a fixed response file. Tests can
  * then check both sides of the exchange. Set behavior to simulate a timeout, missing response
  * file, nonzero exit code, or invalid response data.
+ *
+ * For downloads, the normal behavior writes downloadBody to the request's downloadTo path. The
+ * response matches a worker that supports downloads.
  */
 component accessors="true" {
 
-	property name="behavior"; // Valid values: normal, timeout, noFile, errorResponse, or malformed.
+	// Supported values: normal, timeout, noFile, errorResponse, malformed, oldHelper,
+	// downloadError, and partialThenFail.
+	property name="behavior";
 	property name="response"; // Response struct written when behavior is normal.
+	property name="downloadBody"; // Bytes written to downloadTo when the request asks for a download.
 	property name="lastRequest"; // Most recent request struct written by CloudScraper.
 	property name="lastCommand"; // Most recent command array created by CloudScraper.
 
 	function init(){
-		variables.behavior    = "normal";
-		variables.response    = defaultResponse();
-		variables.lastRequest = {};
-		variables.lastCommand = [];
+		variables.behavior     = "normal";
+		variables.response     = defaultResponse();
+		variables.downloadBody = charsetDecode( "id,name#chr( 13 )##chr( 10 )#1,Test", "utf-8" );
+		variables.lastRequest  = {};
+		variables.lastCommand  = [];
 		return this;
 	}
 
@@ -80,14 +87,75 @@ component accessors="true" {
 					"timedOut" : false,
 					"logPath"  : arguments.logPath
 				};
+			case "oldHelper":
+				// Simulate version 1.0.1. It ignores downloadTo, returns the full body, and omits
+				// the download result fields.
+				var legacy = duplicate( variables.response );
+				structDelete( legacy, "downloadedTo" );
+				structDelete( legacy, "bytesWritten" );
+				fileWrite( resPath, serializeJSON( legacy ) );
+				return {
+					"exitCode" : 0,
+					"timedOut" : false,
+					"logPath"  : arguments.logPath
+				};
+			case "downloadError":
+				// Return an HTTP error without changing the target file.
+				var errorResponse               = duplicate( variables.response );
+				errorResponse[ "statusCode" ]   = 403;
+				errorResponse[ "statusText" ]   = "Forbidden";
+				errorResponse[ "downloadedTo" ] = "";
+				errorResponse[ "bytesWritten" ] = 0;
+				errorResponse[ "bodyBase64" ]   = binaryEncode(
+					charsetDecode( "<h1>Forbidden</h1>", "utf-8" ),
+					"base64"
+				);
+				fileWrite( resPath, serializeJSON( errorResponse ) );
+				return {
+					"exitCode" : 0,
+					"timedOut" : false,
+					"logPath"  : arguments.logPath
+				};
+			case "partialThenFail":
+				// Write part of the file and then report a timeout. CloudScraper should delete it.
+				var partPath = variables.lastRequest.downloadPartPath ?: "";
+				if ( len( partPath ) ) {
+					fileWrite( partPath, "half a file" );
+				}
+				return {
+					"exitCode" : -1,
+					"timedOut" : true,
+					"logPath"  : arguments.logPath
+				};
 			default:
-				fileWrite( resPath, serializeJSON( variables.response ) );
+				fileWrite( resPath, serializeJSON( downloadAwareResponse() ) );
 				return {
 					"exitCode" : 0,
 					"timedOut" : false,
 					"logPath"  : arguments.logPath
 				};
 		}
+	}
+
+	/**
+	 * Return the normal mock response.
+	 *
+	 * If the request has downloadTo, write downloadBody to that path. Return the download path and
+	 * byte count, and leave bodyBase64 empty.
+	 */
+	private struct function downloadAwareResponse(){
+		var target = variables.lastRequest.downloadTo ?: "";
+		if ( !len( target ) ) {
+			return variables.response;
+		}
+
+		fileWrite( target, variables.downloadBody );
+
+		var downloaded               = duplicate( variables.response );
+		downloaded[ "bodyBase64" ]   = "";
+		downloaded[ "downloadedTo" ] = target;
+		downloaded[ "bytesWritten" ] = getFileInfo( target ).size;
+		return downloaded;
 	}
 
 	/**
@@ -117,9 +185,12 @@ component accessors="true" {
 					"expires" : 0
 				}
 			],
-			"bodyBase64"  : binaryEncode( charsetDecode( "Hello, cbcloudscraper!", "utf-8" ), "base64" ),
-			"bodyCharset" : "utf-8",
-			"error"       : ""
+			"bodyBase64"   : binaryEncode( charsetDecode( "Hello, cbcloudscraper!", "utf-8" ), "base64" ),
+			"bodyCharset"  : "utf-8",
+			// Workers with download support always include these fields.
+			"downloadedTo" : "",
+			"bytesWritten" : 0,
+			"error"        : ""
 		};
 	}
 

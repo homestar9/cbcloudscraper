@@ -404,6 +404,9 @@ component singleton accessors="true" {
 	 * Create a directory and any missing parents. java.io.File.mkdirs() is used instead of
 	 * directoryCreate() because Adobe ColdFusion accepts only the path argument, and Lucee's
 	 * extra arguments make the file fail to compile on Adobe - even on a line that never runs.
+	 *
+	 * FileUtil.cfc has the shared version of this method. CommandBox builds this component without
+	 * WireBox, so FileUtil cannot be injected here. Keep this local version to avoid that dependency.
 	 */
 	private boolean function makeDirectory( required string path ){
 		if ( directoryExists( arguments.path ) ) {

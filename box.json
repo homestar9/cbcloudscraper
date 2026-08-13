@@ -1,6 +1,6 @@
 {
 	"name"          : "cbcloudscraper",
-	"version"       : "1.0.1",
+	"version"       : "1.1.0",
 	"location"      : "ForgeboxStorage",
 	"author"        : "Angry Sam Productions, Inc. <dave@angrysam.com>",
 	"homepage"      : "https://github.com/homestar9/cbcloudscraper",
@@ -35,7 +35,9 @@
 		"release:existing-tag" : "task run taskFile=build/Release.cfc target=run :version=`package show version` :existingTag=true",
 		"release:skip-tests"   : "task run taskFile=build/Release.cfc target=run :version=`package show version` :skipTests=true",
 		"release:hotfix"       : "task run taskFile=build/Release.cfc target=run :version=`package show version` :skipTests=true",
+		"test"                 : "testbox run",
 		"test:engines"         : "task run taskFile=build/TestEngines.cfc",
+		"test:python"          : "!%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -File build/run-python-tests.ps1",
 		"bump:major"           : "task run taskFile=build/Bump.cfc :level=major",
 		"bump:minor"           : "task run taskFile=build/Bump.cfc :level=minor",
 		"bump:patch"           : "task run taskFile=build/Bump.cfc :level=patch",
@@ -47,13 +49,13 @@
 		"format"               : "cfformat run models,tasks,ModuleConfig.cfc,test-harness/tests/ --overwrite",
 		"format:watch"         : "cfformat watch models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
 		"format:check"         : "cfformat check models,tasks,ModuleConfig.cfc,test-harness/tests/ ./.cfformat.json",
-		"start:lucee"          : "server start serverConfigFile=server-lucee@5.json",
+		"start:lucee6"         : "server start serverConfigFile=server-lucee@6.json",
 		"start:2023"           : "server start serverConfigFile=server-adobe@2023.json",
 		"start:boxlang"        : "server start serverConfigFile=server-boxlang-cfml@1.json",
-		"stop:lucee"           : "server stop serverConfigFile=server-lucee@5.json",
+		"stop:lucee6"          : "server stop serverConfigFile=server-lucee@6.json",
 		"stop:2023"            : "server stop serverConfigFile=server-adobe@2023.json",
 		"stop:boxlang"         : "server stop serverConfigFile=server-boxlang-cfml@1.json",
-		"logs:lucee"           : "server log serverConfigFile=server-lucee@5.json --follow"
+		"logs:lucee6"          : "server log serverConfigFile=server-lucee@6.json --follow"
 	},
 	"testbox" : {
 		"runner" : "http://localhost:60299/tests/runner.cfm"

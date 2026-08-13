@@ -9,8 +9,12 @@ Usage:
 
 The command line carries only these two file paths. The URL, headers, and body all
 travel inside the request file, which avoids command-line length limits and quoting
-problems. The response body is base64-encoded so it survives any character set,
-compression, or binary content byte-for-byte.
+problems. The response body is base64-encoded so it arrives byte-for-byte no matter
+its character set, compression, or content.
+
+Set "downloadto" to an absolute path to save the body to a file. The worker writes
+the body in chunks and does not encode it as base64. The response sets "downloadedTo"
+and "bytesWritten". It leaves "bodyBase64" empty.
 
 Exit code:
     0  an HTTP response was received (any status, including 403 or 404).
@@ -26,6 +30,7 @@ import time
 
 from cookiejar import load_cookies, save_cookies
 from engines import cloudscraper_engine, curl_cffi_engine
+from engines.common import CHALLENGE_STATUSES, head_has_challenge_marker
 
 ENGINES = {
     curl_cffi_engine.NAME: curl_cffi_engine,
@@ -35,15 +40,6 @@ ENGINES = {
 # Order used when the request asks for "auto": try the TLS-fingerprint engine first,
 # then fall back to the JavaScript-challenge engine.
 AUTO_ORDER = [curl_cffi_engine.NAME, cloudscraper_engine.NAME]
-
-CHALLENGE_MARKERS = (
-    "just a moment",
-    "cf-challenge",
-    "challenge-platform",
-    "cf_chl_opt",
-    "attention required",
-    "enable javascript and cookies to continue",
-)
 
 
 def log(message):
@@ -69,14 +65,12 @@ def looks_like_challenge(result):
     if result is None or not server_is_cloudflare(result):
         return False
 
-    if result.get("statusCode", 0) in (403, 429, 503):
+    if result.get("statusCode", 0) in CHALLENGE_STATUSES:
         return True
 
-    try:
-        head = result.get("bodyBytes", b"")[:4096].decode("utf-8", "ignore").lower()
-    except Exception:
-        head = ""
-    return any(marker in head for marker in CHALLENGE_MARKERS)
+    # A file download has no bodyBytes. receive_body() already checked the response for
+    # Cloudflare challenge markers before saving it.
+    return head_has_challenge_marker(result.get("bodyBytes", b""))
 
 
 def resolve_engine_order(request):
@@ -155,6 +149,9 @@ def failure_response(message, errors):
         "cookies": [],
         "bodyBase64": "",
         "bodyCharset": "utf-8",
+        # These keys identify workers that support downloadTo.
+        "downloadedTo": "",
+        "bytesWritten": 0,
         "error": {"type": "worker", "message": message, "engineNotes": errors},
     }
 

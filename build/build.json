@@ -34,11 +34,9 @@
         "^bin$"
     ],
     "engines":[
-        { "name":"Lucee 5", "configFile":"server-lucee@5.json" },
         { "name":"Lucee 6", "configFile":"server-lucee@6.json" },
         { "name":"Adobe 2023", "configFile":"server-adobe@2023.json" },
         { "name":"Adobe 2025", "configFile":"server-adobe@2025.json" },
-        { "name":"BoxLang", "configFile":"server-boxlang@1.json" },
         { "name":"BoxLang CFML", "configFile":"server-boxlang-cfml@1.json" }
     ]
 }

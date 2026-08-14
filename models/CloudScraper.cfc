@@ -481,6 +481,7 @@ component singleton accessors="true" {
 			"engineUsed"          : arguments.raw.engineUsed ?: "",
 			"downloadedTo"        : download.downloadedTo,
 			"bytesWritten"        : download.bytesWritten,
+			"downloadStreamed"    : download.streamed,
 			"executionTime"       : getTickCount() - arguments.started,
 			"errorDetail"         : ""
 		};
@@ -492,10 +493,14 @@ component singleton accessors="true" {
 	 * Workers with download support always return a downloadedTo key. Older workers omit that key
 	 * and return the full body as base64. Write that body to the target for backward compatibility.
 	 *
+	 * The returned "streamed" value says which path ran. It becomes the downloadStreamed result key,
+	 * so an application can tell that it did not get the memory saving instead of having to read the
+	 * log.
+	 *
 	 * @raw     The response struct read from the executable's response file.
 	 * @request The request struct that produced this response.
 	 *
-	 * @return A struct with bodyBytes, downloadedTo, and bytesWritten.
+	 * @return A struct with bodyBytes, downloadedTo, bytesWritten, and streamed.
 	 */
 	private struct function resolveDownload( required struct raw, required struct request ){
 		var bodyBytes = binaryDecode( arguments.raw.bodyBase64 ?: "", "base64" );
@@ -505,7 +510,8 @@ component singleton accessors="true" {
 			return {
 				"bodyBytes"    : bodyBytes,
 				"downloadedTo" : "",
-				"bytesWritten" : 0
+				"bytesWritten" : 0,
+				"streamed"     : false
 			};
 		}
 
@@ -513,7 +519,8 @@ component singleton accessors="true" {
 			return {
 				"bodyBytes"    : bodyBytes,
 				"downloadedTo" : arguments.raw.downloadedTo,
-				"bytesWritten" : arguments.raw.bytesWritten ?: 0
+				"bytesWritten" : arguments.raw.bytesWritten ?: 0,
+				"streamed"     : len( arguments.raw.downloadedTo ) > 0
 			};
 		}
 
@@ -530,7 +537,8 @@ component singleton accessors="true" {
 			return {
 				"bodyBytes"    : bodyBytes,
 				"downloadedTo" : "",
-				"bytesWritten" : 0
+				"bytesWritten" : 0,
+				"streamed"     : false
 			};
 		}
 
@@ -539,7 +547,9 @@ component singleton accessors="true" {
 			// Return empty bytes to match the result from a worker with download support.
 			"bodyBytes"    : binaryDecode( "", "base64" ),
 			"downloadedTo" : target,
-			"bytesWritten" : getFileInfo( target ).size
+			"bytesWritten" : getFileInfo( target ).size,
+			// False because CFML wrote this file after holding the whole body in memory.
+			"streamed"     : false
 		};
 	}
 
@@ -574,6 +584,7 @@ component singleton accessors="true" {
 			"engineUsed"          : "",
 			"downloadedTo"        : "",
 			"bytesWritten"        : 0,
+			"downloadStreamed"    : false,
 			"executionTime"       : getTickCount() - arguments.started,
 			"errorDetail"         : arguments.detail
 		};

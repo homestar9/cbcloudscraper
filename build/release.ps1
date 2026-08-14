@@ -34,12 +34,17 @@
 .PARAMETER SkipBinaryBuild
     Reuse the existing bin\win64 binary instead of rebuilding it.
 
+.PARAMETER SkipEngineTests
+    Skip the multi-engine test sweep. Use this only for an urgent hotfix. The sweep is what
+    catches code that works on one CFML engine and fails to compile on another.
+
 .PARAMETER ExistingTag
     Publish a tag that already exists and points at the checked-out commit, instead of creating
     one. Use this whenever GitKraken or the git-flow extension made the tag.
 #>
 param(
     [switch]$SkipBinaryBuild,
+    [switch]$SkipEngineTests,
     [switch]$ExistingTag
 )
 
@@ -69,12 +74,28 @@ $Tag     = "v$Version"
 
 Push-Location $RepoRoot
 try {
-    # ── 2. Start the test server the kit uses to run the suite during release ──
+    # ── 2. Run the suite on every supported CFML engine ───────────────────────
+    # The engines are listed in build/build.json. They run one at a time, because they share one
+    # port, and TestEngines.cfc stops every server when it finishes. That is why this has to run
+    # before the kit's own server starts below.
+    #
+    # This step exists because CFML engines disagree at compile time. Version 1.1.0 shipped with a
+    # cfzip call that made the module impossible to load on a default Adobe ColdFusion install, and
+    # a single-engine release could not have caught it.
+    if (-not $SkipEngineTests) {
+        Write-Host "Running the test suite on every engine..." -ForegroundColor Cyan
+        box run-script test:engines
+        if ($LASTEXITCODE -ne 0) { throw "The multi-engine test sweep (box run-script test:engines) failed." }
+    } else {
+        Write-Host "Skipping the multi-engine test sweep (-SkipEngineTests)." -ForegroundColor Yellow
+    }
+
+    # ── 3. Start the test server the kit uses to run the suite during release ──
     # Adobe 2023 is the engine used in production, so the release runs its tests there.
     Write-Host "Starting the Adobe 2023 test server..." -ForegroundColor Cyan
     box server start serverConfigFile=server-adobe@2023.json --noSaveSettings | Out-Null
 
-    # ── 3. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
+    # ── 4. Run the build-template release (tests, source package, ForgeBox, tag, GitHub Release) ──
     # release:existing-tag skips tag creation and the branch push, because the tag is already
     # made and pushed. Everything else about the two paths is the same.
     $ReleaseScript = if ($ExistingTag) { "release:existing-tag" } else { "release" }
@@ -86,19 +107,29 @@ try {
     box run-script $ReleaseScript
     if ($LASTEXITCODE -ne 0) { throw "The release kit (box run-script $ReleaseScript) failed." }
 
-    # ── 4. Zip the binary folder and write its SHA-256 ────────────────────────
+    # ── 5. Zip the binary folder and write its SHA-256 ────────────────────────
     # Built here, after the kit runs, because the kit rewrites the .artifacts directory and would
     # otherwise delete this zip before it is uploaded.
     if (Test-Path $ArtifactDir) { Remove-Item -Recurse -Force $ArtifactDir }
     New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
     $Zip = Join-Path $ArtifactDir "cbcloudscraper-win64.zip"
-    Compress-Archive -Path (Join-Path $BinDir "*") -DestinationPath $Zip -Force
+    # ZipFile::CreateFromDirectory is used instead of Compress-Archive because Compress-Archive on
+    # Windows PowerShell writes entry names with backslashes, such as "_internal\cryptography\".
+    # The zip format says entry names use forward slashes, and a reader that follows the format
+    # cannot tell those folder entries from files. Releases up to 1.1.0 were built the broken way.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $BinDir,
+        $Zip,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $false   # do not add the bin\win64 folder itself as a top-level entry
+    )
     $Hash = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLower()
     [System.IO.File]::WriteAllText("$Zip.sha256", "$Hash  cbcloudscraper-win64.zip`n", (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "Binary asset ready: $Zip" -ForegroundColor Green
     Write-Host "SHA-256: $Hash"
 
-    # ── 5. Attach the binary to the Release the kit just created ──────────────
+    # ── 6. Attach the binary to the Release the kit just created ──────────────
     Write-Host "Attaching the binary to Release $Tag..." -ForegroundColor Cyan
     if (-not (Test-Path $Zip)) { throw "Binary asset $Zip is missing; cannot upload it to Release $Tag." }
     gh release upload $Tag $Zip "$Zip.sha256" --clobber

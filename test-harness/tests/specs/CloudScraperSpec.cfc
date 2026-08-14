@@ -195,6 +195,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( result.ok ).toBeTrue();
 					expect( result.downloadedTo ).toBe( target );
 					expect( result.bytesWritten ).toBe( 8 );
+					// The helper wrote the file, so the body never passed through CFML memory.
+					expect( result.downloadStreamed ).toBeTrue();
 					expect( fileExists( target ) ).toBeTrue();
 					expect( fileRead( target, "utf-8" ) ).toBe( "a,b#chr( 13 )##chr( 10 )#1,2" );
 
@@ -222,6 +224,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( result.statusCode ).toBe( 403 );
 					expect( result.downloadedTo ).toBe( "" );
 					expect( result.bytesWritten ).toBe( 0 );
+					// No file was written at all, so nothing was streamed.
+					expect( result.downloadStreamed ).toBeFalse();
 					expect( fileRead( target, "utf-8" ) ).toBe( before );
 					expect( before ).toInclude( "yesterday's good data" );
 					// Return the error page in memory so the caller can inspect it.
@@ -243,6 +247,9 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					expect( fileRead( target, "utf-8" ) ).toBe( "Hello, cbcloudscraper!" );
 					expect( result.fileContent ).toBe( "" );
 					expect( binaryEncode( result.fileContentAsBinary, "base64" ) ).toBe( "" );
+					// The one key that tells the two paths apart. CFML held the whole body in
+					// memory here, so the caller did not get the memory saving.
+					expect( result.downloadStreamed ).toBeFalse();
 				} );
 
 				it( "deletes the in-progress file when the request fails", function(){

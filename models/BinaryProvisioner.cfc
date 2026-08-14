@@ -70,7 +70,9 @@ component singleton accessors="true" {
 				baseURL        = getBaseURL(),
 				verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 				force          = false,
-				onProgress     = logCallback()
+				onProgress     = logCallback(),
+				strictChecksum = ( structKeyExists( settings, "strictChecksum" ) ? settings.strictChecksum : false ),
+				onWarning      = warnCallback()
 			);
 		}
 
@@ -92,7 +94,9 @@ component singleton accessors="true" {
 			baseURL        = getBaseURL(),
 			verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 			force          = arguments.force,
-			onProgress     = logCallback()
+			onProgress     = logCallback(),
+			strictChecksum = ( structKeyExists( settings, "strictChecksum" ) ? settings.strictChecksum : false ),
+			onWarning      = warnCallback()
 		);
 	}
 
@@ -139,6 +143,16 @@ component singleton accessors="true" {
 	private any function logCallback(){
 		return function( message ){
 			logger.info( message );
+		};
+	}
+
+	/**
+	 * A callback for messages that should stand out in a production log, such as a download whose
+	 * checksum could not be checked. Progress messages go to info, which is easy to miss.
+	 */
+	private any function warnCallback(){
+		return function( message ){
+			logger.warn( message );
 		};
 	}
 

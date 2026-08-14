@@ -125,12 +125,19 @@ The script performs these actions:
 
 1. Builds the Windows helper.
 2. Creates its ZIP file and SHA-256 checksum.
-3. Starts the Adobe 2023 test server.
-4. Runs the tests and builds the CFML package.
-5. Publishes the module to ForgeBox.
-6. Creates and pushes tag `v1.0.0`.
-7. Creates the GitHub Release.
-8. Uploads the helper ZIP file and checksum.
+3. Runs the test suite on every supported engine: Lucee 6, Adobe 2023, Adobe 2025, and BoxLang
+   CFML. The engines run one at a time because they share a port. A failure on any engine stops
+   the release.
+4. Starts the Adobe 2023 test server.
+5. Runs the tests and builds the CFML package.
+6. Publishes the module to ForgeBox.
+7. Creates and pushes tag `v1.0.0`.
+8. Creates the GitHub Release.
+9. Uploads the helper ZIP file and checksum.
+
+Step 3 takes several minutes, because it starts and stops four servers. Pass `-SkipEngineTests` to
+skip it for an urgent hotfix. Do not make that a habit: CFML engines disagree at compile time, and
+that step is what catches code that loads on one engine and fails on another.
 
 The Adobe 2023 test server may remain running after the release finishes.
 

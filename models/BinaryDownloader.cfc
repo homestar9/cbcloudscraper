@@ -103,6 +103,9 @@ component singleton accessors="true" {
 	 * @verifyChecksum Verify the download's SHA-256 before using it.
 	 * @force          Download even when the cache already matches.
 	 * @onProgress     Optional callback function( message ) for progress output.
+	 * @strictChecksum Stop the download if the checksum file cannot be read. This setting only
+	 *                 applies when verifyChecksum is true.
+	 * @onWarning      Optional callback function( message ) for warnings. Uses onProgress when omitted.
 	 *
 	 * @return A struct with action, path, tag, and present values.
 	 */
@@ -112,7 +115,9 @@ component singleton accessors="true" {
 		required string baseURL,
 		boolean verifyChecksum = true,
 		boolean force          = false,
-		any onProgress         = ""
+		any onProgress         = "",
+		boolean strictChecksum = false,
+		any onWarning          = ""
 	){
 		var platform   = getPlatform();
 		var targetDir  = normalizeSlashes( arguments.baseDir ) & "/" & platform.dir;
@@ -138,7 +143,9 @@ component singleton accessors="true" {
 			arguments.tag,
 			arguments.baseURL,
 			arguments.verifyChecksum,
-			arguments.onProgress
+			arguments.onProgress,
+			arguments.strictChecksum,
+			arguments.onWarning
 		);
 		writeStamp( targetDir, arguments.tag );
 		logMessage( arguments.onProgress, "cbcloudscraper binary ready: " & binaryFile );
@@ -224,7 +231,9 @@ component singleton accessors="true" {
 		required string tag,
 		required string baseURL,
 		required boolean verifyChecksum,
-		any onProgress = ""
+		any onProgress         = "",
+		boolean strictChecksum = false,
+		any onWarning          = ""
 	){
 		var zipURL   = reReplace( arguments.baseURL, "/$", "" ) & "/" & arguments.tag & "/" & arguments.platform.asset;
 		var stageDir = normalizeSlashes( getTempDirectory() ) & "/cbcloudscraper-download";
@@ -265,7 +274,13 @@ component singleton accessors="true" {
 		}
 
 		if ( arguments.verifyChecksum ) {
-			assertChecksum( zipURL, zipPath, arguments.onProgress );
+			assertChecksum(
+				zipURL,
+				zipPath,
+				arguments.onProgress,
+				arguments.strictChecksum,
+				arguments.onWarning
+			);
 		}
 
 		// Replace the whole platform directory so files from older builds are removed.
@@ -273,12 +288,7 @@ component singleton accessors="true" {
 			directoryDelete( arguments.targetDir, true );
 		}
 		makeDirectory( arguments.targetDir );
-		cfzip(
-			action      = "unzip",
-			file        = zipPath,
-			destination = arguments.targetDir,
-			overwrite   = true
-		);
+		unzip( zipPath, arguments.targetDir );
 
 		if ( !fileExists( arguments.binaryFile ) ) {
 			throw(
@@ -305,16 +315,20 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Compare the archive with its published .sha256 checksum. Skip this check when the checksum
-	 * file is missing. Reject the archive when a published checksum does not match.
+	 * Check the archive against its published SHA-256 checksum.
 	 *
-	 * The name is not "verifyChecksum" because ensure() and download() have a boolean argument
-	 * with that name, and an unscoped call would resolve to the argument instead of this method.
+	 * If the checksum file cannot be read, strictChecksum=true deletes the archive and throws an
+	 * error. When strictChecksum=false, this method logs a warning and keeps the archive.
+	 *
+	 * This method has a different name because ensure() and download() already have a verifyChecksum
+	 * argument. Inside those methods, verifyChecksum() would use the argument instead of this method.
 	 */
 	private void function assertChecksum(
 		required string zipURL,
 		required string zipPath,
-		any onProgress = ""
+		any onProgress         = "",
+		boolean strictChecksum = false,
+		any onWarning          = ""
 	){
 		var sumURL   = arguments.zipURL & ".sha256";
 		var expected = "";
@@ -338,7 +352,16 @@ component singleton accessors="true" {
 		}
 
 		if ( !len( expected ) ) {
-			logMessage(
+			if ( arguments.strictChecksum ) {
+				fileDelete( arguments.zipPath );
+				throw(
+					type    = "cbcloudscraper.BinaryUnavailable",
+					message = "The cbcloudscraper binary could not be checked against a published checksum.",
+					detail  = "Could not read the SHA-256 checksum at " & sumURL & ". The download was deleted because the strictChecksum setting is on. Set strictChecksum to false to accept a download that could not be checked."
+				);
+			}
+			warn(
+				arguments.onWarning,
 				arguments.onProgress,
 				"Warning: could not read the published SHA-256 checksum at " & sumURL & ". Skipping checksum verification for this download."
 			);
@@ -353,6 +376,127 @@ component singleton accessors="true" {
 				message = "The downloaded cbcloudscraper binary failed its checksum check.",
 				detail  = "Expected SHA-256 " & expected & " but got " & actual & ". The download was deleted. This can mean a corrupted or tampered file."
 			);
+		}
+	}
+
+	/**
+	 * Unpack a zip archive into a directory.
+	 *
+	 * Use java.util.zip so this component works without Adobe ColdFusion's optional zip package.
+	 * Adobe checks for missing tag packages when it compiles this file. A cfzip call would stop the
+	 * module from loading even when unzip() never runs.
+	 *
+	 * @zipPath   The archive to read.
+	 * @targetDir The directory to unpack into. It must already exist.
+	 */
+	private void function unzip( required string zipPath, required string targetDir ){
+		var targetRoot = createObject( "java", "java.io.File" ).init( javacast( "string", arguments.targetDir ) );
+		// Resolve "..", symbolic links, and separator differences before checking entry paths.
+		var rootPath = targetRoot.getCanonicalPath();
+		var fileIn   = createObject( "java", "java.io.FileInputStream" ).init( javacast( "string", arguments.zipPath ) );
+		var zipIn    = createObject( "java", "java.util.zip.ZipInputStream" ).init( fileIn );
+
+		try {
+			local.entry = zipIn.getNextEntry();
+			while ( !isNull( local.entry ) ) {
+				writeZipEntry( zipIn, local.entry, targetRoot, rootPath );
+				zipIn.closeEntry();
+				local.entry = zipIn.getNextEntry();
+			}
+		} finally {
+			closeQuietly( zipIn );
+			closeQuietly( fileIn );
+		}
+	}
+
+	/**
+	 * Write one zip entry to disk. Reject an entry that would land outside the target directory.
+	 *
+	 * @zipIn      The open ZipInputStream, positioned on this entry.
+	 * @entry      The ZipEntry being read.
+	 * @targetRoot A java.io.File for the target directory.
+	 * @rootPath   The canonical path of the target directory.
+	 */
+	private void function writeZipEntry(
+		required any zipIn,
+		required any entry,
+		required any targetRoot,
+		required string rootPath
+	){
+		// Releases through 1.1.0 used backslashes in ZIP entry names. Convert them because ZIP paths
+		// use forward slashes, and Java uses a trailing slash to identify a directory entry.
+		var entryName = replace( arguments.entry.getName(), "\", "/", "all" );
+		var isFolder  = arguments.entry.isDirectory() || right( entryName, 1 ) == "/";
+
+		var outFile = createObject( "java", "java.io.File" ).init(
+			arguments.targetRoot,
+			javacast( "string", entryName )
+		);
+		var outPath = outFile.getCanonicalPath();
+
+		// Reject entries such as "../../evil.exe" that would write outside the target directory.
+		var separator = createObject( "java", "java.io.File" ).separator;
+		if ( outPath != arguments.rootPath && !outPath.startsWith( arguments.rootPath & separator ) ) {
+			throw(
+				type    = "cbcloudscraper.BinaryUnavailable",
+				message = "The downloaded archive contains a file path outside the install directory.",
+				detail  = "Entry '" & entryName & "' resolves to '" & outPath & "', which is not inside '" & arguments.rootPath & "'. The archive was rejected without unpacking it."
+			);
+		}
+
+		if ( isFolder ) {
+			assertDirectory( outPath, entryName );
+			return;
+		}
+
+		assertDirectory( outFile.getParentFile().getCanonicalPath(), entryName );
+
+		// Read 64 KB at a time so the 20 MB executable is not stored in one CFML variable.
+		var buffer = createObject( "java", "java.lang.reflect.Array" ).newInstance(
+			createObject( "java", "java.lang.Byte" ).TYPE,
+			javacast( "int", 65536 )
+		);
+		var fileOut = createObject( "java", "java.io.FileOutputStream" ).init( outFile );
+		try {
+			local.read = arguments.zipIn.read( buffer );
+			while ( local.read > 0 ) {
+				fileOut.write( buffer, javacast( "int", 0 ), javacast( "int", local.read ) );
+				local.read = arguments.zipIn.read( buffer );
+			}
+		} finally {
+			closeQuietly( fileOut );
+		}
+	}
+
+	/**
+	 * Create a directory needed by a ZIP entry. Throw BinaryUnavailable if a file blocks the path
+	 * or the server cannot write there.
+	 *
+	 * @path      The directory to create.
+	 * @entryName The archive entry being unpacked, used in the error message.
+	 */
+	private void function assertDirectory( required string path, required string entryName ){
+		if ( makeDirectory( arguments.path ) ) {
+			return;
+		}
+		throw(
+			type    = "cbcloudscraper.BinaryUnavailable",
+			message = "Could not create a directory while unpacking the cbcloudscraper archive.",
+			detail  = "Unpacking entry '" & arguments.entryName & "' needs the directory '" & arguments.path & "', which could not be created. A file may already exist under that name, or the account running the server may not have write access there."
+		);
+	}
+
+	/**
+	 * Close a stream without throwing. A cleanup error must not replace the main result or error.
+	 */
+	private void function closeQuietly( any stream ){
+		if ( isNull( arguments.stream ) ) {
+			return;
+		}
+		try {
+			arguments.stream.close();
+		} catch ( any e ) {
+			// Ignore the close error.
 		}
 	}
 
@@ -398,6 +542,19 @@ component singleton accessors="true" {
 		if ( callable ) {
 			arguments.onProgress( arguments.message );
 		}
+	}
+
+	/**
+	 * Send a message to onWarning. Use onProgress when onWarning was not provided.
+	 *
+	 * The caller provides callbacks because this component runs both inside and outside WireBox.
+	 */
+	private void function warn( any onWarning, any onProgress, required string message ){
+		if ( !isNull( arguments.onWarning ) && !isSimpleValue( arguments.onWarning ) ) {
+			logMessage( arguments.onWarning, arguments.message );
+			return;
+		}
+		logMessage( arguments.onProgress, arguments.message );
 	}
 
 	/**

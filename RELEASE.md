@@ -124,13 +124,20 @@ powershell -ExecutionPolicy Bypass -File build\release.ps1
 The script performs these actions:
 
 1. Builds the Windows helper.
-2. Creates its ZIP file and SHA-256 checksum.
+2. Runs the test suite on every supported engine: Lucee 6, Adobe 2023, Adobe 2025, and BoxLang
+   CFML. The engines run one at a time because they share a port. A failure on any engine stops
+   the release.
 3. Starts the Adobe 2023 test server.
 4. Runs the tests and builds the CFML package.
 5. Publishes the module to ForgeBox.
 6. Creates and pushes tag `v1.0.0`.
 7. Creates the GitHub Release.
-8. Uploads the helper ZIP file and checksum.
+8. Creates the helper ZIP file and SHA-256 checksum.
+9. Uploads the helper ZIP file and checksum.
+
+The multi-engine tests take several minutes because they start and stop four servers. Use
+`-SkipEngineTests` only when the release cannot wait for these tests. Skipping the multi-engine
+tests can allow code that works on one CFML engine but fails to compile on another.
 
 The Adobe 2023 test server may remain running after the release finishes.
 

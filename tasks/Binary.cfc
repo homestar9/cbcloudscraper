@@ -19,13 +19,16 @@ component {
 	 * @tag       Force a release tag, for example v1.0.0. Defaults to "v" + the module version.
 	 * @baseURL   Force the release download base URL. Defaults to the module's repository releases.
 	 * @verify    Verify the download's SHA-256. Defaults to true.
+	 * @strict    Stop the install when the SHA-256 file cannot be read. Defaults to false, which
+	 *            logs a warning and installs the executable without verifying it.
 	 */
 	function run(
 		string action    = "status",
 		string directory = "",
 		string tag       = "",
 		string baseURL   = "",
-		boolean verify   = true
+		boolean verify   = true,
+		boolean strict   = false
 	){
 		var moduleRoot = resolveModuleRoot();
 
@@ -54,7 +57,9 @@ component {
 					baseURL        = releaseBaseURL,
 					verifyChecksum = arguments.verify,
 					force          = true,
-					onProgress     = onProgress
+					onProgress     = onProgress,
+					strictChecksum = arguments.strict,
+					onWarning      = onProgress
 				);
 				print.greenLine( "Done (" & installed.action & "): " & installed.path ).toConsole();
 				break;
@@ -75,7 +80,9 @@ component {
 							baseURL        = releaseBaseURL,
 							verifyChecksum = arguments.verify,
 							force          = true,
-							onProgress     = onProgress
+							onProgress     = onProgress,
+							strictChecksum = arguments.strict,
+							onWarning      = onProgress
 						);
 						print.greenLine( "Done (" & updated.action & "): " & updated.path ).toConsole();
 					} else {

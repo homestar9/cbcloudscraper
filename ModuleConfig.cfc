@@ -41,6 +41,9 @@ component {
 			"binaryBaseURL"          : "", // Leave empty to use repository.url from box.json.
 			"binaryReleaseTag"       : "", // Leave empty to use "v" plus the module version.
 			"verifyChecksum"         : true,
+			// Set strictChecksum to true to stop the install when the .sha256 file cannot be read.
+			// When false, the module logs a warning and installs the executable without verifying it.
+			"strictChecksum"         : false,
 			// Request defaults
 			"defaultTimeout"         : 30, // Maximum request time in seconds.
 			// Use this timeout when downloadTo is set and the request has no timeout.

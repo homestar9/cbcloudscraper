@@ -7,6 +7,44 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-13
+
+### Fixed
+
+- The module now loads without Adobe ColdFusion's optional `zip` package. It uses `java.util.zip`
+  instead of `cfzip` to unpack the helper. Adobe checks for missing tag packages when it compiles a
+  file. Because of that check, the old `cfzip` call stopped the entire module from loading even when
+  the helper was already installed. You no longer need `cfpm install zip` for this module.
+- Unpacking now rejects entries such as `../../something.exe` that point outside the install
+  directory.
+- The release script now creates ZIP files with `System.IO.Compression.ZipFile`. The old
+  `Compress-Archive` command used backslashes in folder entry names, but the ZIP format requires
+  forward slashes. The unpacker also converts backslashes, so release archives through version
+  1.1.0 still install.
+- Unpacking now throws a `cbcloudscraper.BinaryUnavailable` error when it cannot create a required
+  directory. The error names the directory and explains that a file or missing write access may be
+  blocking directory creation.
+
+### Added
+
+- Added `downloadStreamed` to the result struct. It is `true` only when the helper wrote the file
+  directly. It is `false` when no file was written or an old helper returned the full body to CFML.
+  Applications can now detect the higher-memory fallback without reading the log.
+- Added the `strictChecksum` setting. It defaults to `false`, which logs a warning and continues when
+  the `.sha256` file cannot be read. Set it to `true` to delete the unverified download and throw an
+  error. The `tasks/Binary.cfc` command uses the matching `:strict=true` flag.
+
+### Changed
+
+- A skipped checksum check is now logged at warn level instead of info level. This makes an
+  unverified download easier to find in production logs.
+- `build\release.ps1` now tests Lucee 6, Adobe 2023, Adobe 2025, and BoxLang CFML before publishing.
+  Pass `-SkipEngineTests` to skip these tests when a release cannot wait for them.
+- The README now documents the Adobe package requirements, `downloadStreamed`, `strictChecksum`, and
+  the forward slashes used in `downloadedTo` paths.
+- The README now includes the measured result from a production request that passed one Cloudflare
+  managed challenge. The existing warning still explains that other challenges may fail.
+
 ## [1.1.0] - 2026-08-13
 
 ### Added

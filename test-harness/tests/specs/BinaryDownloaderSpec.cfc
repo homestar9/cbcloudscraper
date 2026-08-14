@@ -25,6 +25,18 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			createObject( "java", "java.io.File" ).init( arguments.path ).mkdirs();
 		};
 
+		// Create a temporary file and return its path with forward slashes.
+		var tempFile = function( required string contents ){
+			var path = replace(
+				getTempDirectory() & "cbcs-spec-" & createUUID(),
+				"\",
+				"/",
+				"all"
+			);
+			fileWrite( path, arguments.contents );
+			return path;
+		};
+
 		describe( "BinaryDownloader", function(){
 			var downloader = "";
 			var platform   = "";
@@ -105,7 +117,232 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				downloader.logMessage( { "not" : "a function" }, "ignored" );
 				expect( messages.len() ).toBe( 1 );
 			} );
+
+			it( "sends a warning to onWarning, and to onProgress when there is no onWarning", function(){
+				makePublic( downloader, "warn" );
+				var warnings = [];
+				var progress = [];
+				var toWarn   = function( message ){
+					warnings.append( arguments.message );
+				};
+				var toProgress = function( message ){
+					progress.append( arguments.message );
+				};
+
+				downloader.warn( toWarn, toProgress, "careful" );
+				expect( warnings ).toBe( [ "careful" ] );
+				expect( progress ).toBeEmpty();
+
+				// If onWarning is missing, warn() sends the message to onProgress.
+				downloader.warn( "", toProgress, "careful again" );
+				expect( warnings.len() ).toBe( 1 );
+				expect( progress ).toBe( [ "careful again" ] );
+			} );
 		} );
+
+		describe( "BinaryDownloader.unzip", function(){
+			var downloader = "";
+			var workDir    = "";
+
+			beforeEach( function(){
+				downloader = getInstance( "BinaryDownloader@cbcloudscraper" );
+				makePublic( downloader, "unzip" );
+				workDir = replace(
+					getTempDirectory() & "cbcs-unzip-" & createUUID(),
+					"\",
+					"/",
+					"all"
+				);
+				makeDirs( workDir );
+			} );
+
+			afterEach( function(){
+				if ( directoryExists( workDir ) ) {
+					directoryDelete( workDir, true );
+				}
+			} );
+
+			it( "unpacks a flat archive and keeps the file contents", function(){
+				var zipPath = workDir & "/flat.zip";
+				var target  = workDir & "/out";
+				variables.writeZip(
+					zipPath,
+					[
+						{ "name" : "readme.txt", "contents" : "hello" },
+						{ "name" : "second.txt", "contents" : "world" }
+					]
+				);
+				makeDirs( target );
+
+				downloader.unzip( zipPath, target );
+
+				expect( fileExists( target & "/readme.txt" ) ).toBeTrue();
+				expect( fileRead( target & "/readme.txt", "utf-8" ) ).toBe( "hello" );
+				expect( fileRead( target & "/second.txt", "utf-8" ) ).toBe( "world" );
+			} );
+
+			it( "creates folders for entries inside a nested path", function(){
+				var zipPath = workDir & "/nested.zip";
+				var target  = workDir & "/out";
+				variables.writeZip( zipPath, [ { "name" : "lib/inner/data.txt", "contents" : "deep" } ] );
+				makeDirs( target );
+
+				downloader.unzip( zipPath, target );
+
+				expect( directoryExists( target & "/lib/inner" ) ).toBeTrue();
+				expect( fileRead( target & "/lib/inner/data.txt", "utf-8" ) ).toBe( "deep" );
+			} );
+
+			it( "handles folder entries named with backslashes", function(){
+				// Releases through 1.1.0 used backslashes in ZIP entry names. Verify that these old
+				// archives still unpack correctly.
+				var zipPath = workDir & "/backslash.zip";
+				var target  = workDir & "/out";
+				variables.writeZip(
+					zipPath,
+					[
+						{ "name" : "_internal\" },
+						{ "name" : "_internal\crypto\" },
+						{ "name" : "_internal\crypto\bindings.pyd", "contents" : "binary-ish" }
+					]
+				);
+				makeDirs( target );
+
+				downloader.unzip( zipPath, target );
+
+				expect( directoryExists( target & "/_internal/crypto" ) ).toBeTrue();
+				expect( fileRead( target & "/_internal/crypto/bindings.pyd", "utf-8" ) ).toBe( "binary-ish" );
+			} );
+
+			it( "reports a readable error when a directory cannot be created", function(){
+				// Create a file where the next entry needs a directory. Verify that unzip reports the
+				// conflict as a BinaryUnavailable error.
+				var zipPath = workDir & "/clash.zip";
+				var target  = workDir & "/out";
+				variables.writeZip(
+					zipPath,
+					[
+						{ "name" : "thing", "contents" : "I am a file" },
+						{ "name" : "thing/inside.txt", "contents" : "I need thing to be a folder" }
+					]
+				);
+				makeDirs( target );
+
+				expect( function(){
+					downloader.unzip( zipPath, target );
+				} ).toThrow( type = "cbcloudscraper.BinaryUnavailable", regex = "Could not create a directory" );
+			} );
+
+			it( "unpacks a file larger than the copy buffer without losing bytes", function(){
+				var zipPath = workDir & "/big.zip";
+				var target  = workDir & "/out";
+				// Use more than 64 KB so the read loop runs more than once.
+				var big = repeatString( "abcdefghij", 20000 );
+				variables.writeZip( zipPath, [ { "name" : "big.txt", "contents" : big } ] );
+				makeDirs( target );
+
+				downloader.unzip( zipPath, target );
+
+				expect( getFileInfo( target & "/big.txt" ).size ).toBe( len( big ) );
+				expect( fileRead( target & "/big.txt", "utf-8" ) ).toBe( big );
+			} );
+
+			it( "rejects an entry whose path escapes the target directory", function(){
+				var zipPath = workDir & "/evil.zip";
+				var target  = workDir & "/out";
+				variables.writeZip( zipPath, [ { "name" : "../escaped.txt", "contents" : "no" } ] );
+				makeDirs( target );
+
+				expect( function(){
+					downloader.unzip( zipPath, target );
+				} ).toThrow( type = "cbcloudscraper.BinaryUnavailable" );
+
+				expect( fileExists( workDir & "/escaped.txt" ) ).toBeFalse();
+			} );
+		} );
+
+		describe( "BinaryDownloader.assertChecksum", function(){
+			var downloader = "";
+
+			beforeEach( function(){
+				downloader = getInstance( "BinaryDownloader@cbcloudscraper" );
+				makePublic( downloader, "assertChecksum" );
+			} );
+
+			// Port 1 has no listener. This URL fails without DNS or internet access.
+			var deadURL = "http://127.0.0.1:1/asset.zip";
+
+			it( "warns and continues when the published checksum cannot be read", function(){
+				var fakeZip  = tempFile( "not a real archive" );
+				var warnings = [];
+				try {
+					downloader.assertChecksum(
+						zipURL    = deadURL,
+						zipPath   = fakeZip,
+						onWarning = function( message ){
+							warnings.append( arguments.message );
+						}
+					);
+					expect( warnings.len() ).toBe( 1 );
+					expect( warnings[ 1 ] ).toInclude( "Skipping checksum verification" );
+					// Non-strict mode keeps the archive after logging a warning.
+					expect( fileExists( fakeZip ) ).toBeTrue();
+				} finally {
+					if ( fileExists( fakeZip ) ) {
+						fileDelete( fakeZip );
+					}
+				}
+			} );
+
+			it( "throws and deletes the download when strictChecksum is on", function(){
+				var fakeZip = tempFile( "not a real archive" );
+				try {
+					expect( function(){
+						downloader.assertChecksum(
+							zipURL         = deadURL,
+							zipPath        = fakeZip,
+							strictChecksum = true
+						);
+					} ).toThrow( type = "cbcloudscraper.BinaryUnavailable" );
+					expect( fileExists( fakeZip ) ).toBeFalse();
+				} finally {
+					if ( fileExists( fakeZip ) ) {
+						fileDelete( fakeZip );
+					}
+				}
+			} );
+		} );
+	}
+
+	/**
+	 * Create a ZIP archive for the unzip tests.
+	 *
+	 * Use java.util.zip because a default Adobe ColdFusion install does not include the optional
+	 * zip package that provides cfzip.
+	 *
+	 * Each entry needs a name and may have contents. An entry without contents is empty. A trailing
+	 * slash in the name marks the entry as a directory.
+	 *
+	 * @zipPath Where to write the archive.
+	 * @entries An array of structs, each with a name and optional contents.
+	 */
+	private void function writeZip( required string zipPath, required array entries ){
+		var fileOut = createObject( "java", "java.io.FileOutputStream" ).init( javacast( "string", arguments.zipPath ) );
+		var zipOut  = createObject( "java", "java.util.zip.ZipOutputStream" ).init( fileOut );
+		try {
+			for ( var entry in arguments.entries ) {
+				zipOut.putNextEntry(
+					createObject( "java", "java.util.zip.ZipEntry" ).init( javacast( "string", entry.name ) )
+				);
+				if ( structKeyExists( entry, "contents" ) ) {
+					zipOut.write( javacast( "string", entry.contents ).getBytes( "UTF-8" ) );
+				}
+				zipOut.closeEntry();
+			}
+		} finally {
+			zipOut.close();
+			fileOut.close();
+		}
 	}
 
 }

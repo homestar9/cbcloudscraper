@@ -70,7 +70,9 @@ component singleton accessors="true" {
 				baseURL        = getBaseURL(),
 				verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 				force          = false,
-				onProgress     = logCallback()
+				onProgress     = logCallback(),
+				strictChecksum = ( structKeyExists( settings, "strictChecksum" ) ? settings.strictChecksum : false ),
+				onWarning      = warnCallback()
 			);
 		}
 
@@ -92,7 +94,9 @@ component singleton accessors="true" {
 			baseURL        = getBaseURL(),
 			verifyChecksum = ( structKeyExists( settings, "verifyChecksum" ) ? settings.verifyChecksum : true ),
 			force          = arguments.force,
-			onProgress     = logCallback()
+			onProgress     = logCallback(),
+			strictChecksum = ( structKeyExists( settings, "strictChecksum" ) ? settings.strictChecksum : false ),
+			onWarning      = warnCallback()
 		);
 	}
 
@@ -139,6 +143,15 @@ component singleton accessors="true" {
 	private any function logCallback(){
 		return function( message ){
 			logger.info( message );
+		};
+	}
+
+	/**
+	 * Return a callback that writes messages at warn level. Progress messages use info level.
+	 */
+	private any function warnCallback(){
+		return function( message ){
+			logger.warn( message );
 		};
 	}
 

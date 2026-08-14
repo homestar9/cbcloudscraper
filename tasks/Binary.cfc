@@ -19,8 +19,8 @@ component {
 	 * @tag       Force a release tag, for example v1.0.0. Defaults to "v" + the module version.
 	 * @baseURL   Force the release download base URL. Defaults to the module's repository releases.
 	 * @verify    Verify the download's SHA-256. Defaults to true.
-	 * @strict    Fail when the published SHA-256 cannot be read, instead of warning and installing
-	 *            the download anyway. Defaults to false.
+	 * @strict    Stop the install when the SHA-256 file cannot be read. Defaults to false, which
+	 *            logs a warning and installs the executable without verifying it.
 	 */
 	function run(
 		string action    = "status",

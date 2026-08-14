@@ -35,8 +35,7 @@
     Reuse the existing bin\win64 binary instead of rebuilding it.
 
 .PARAMETER SkipEngineTests
-    Skip the multi-engine test sweep. Use this only for an urgent hotfix. The sweep is what
-    catches code that works on one CFML engine and fails to compile on another.
+    Skip tests on the supported CFML engines. This can allow engine-specific errors into a release.
 
 .PARAMETER ExistingTag
     Publish a tag that already exists and points at the checked-out commit, instead of creating
@@ -75,13 +74,8 @@ $Tag     = "v$Version"
 Push-Location $RepoRoot
 try {
     # ── 2. Run the suite on every supported CFML engine ───────────────────────
-    # The engines are listed in build/build.json. They run one at a time, because they share one
-    # port, and TestEngines.cfc stops every server when it finishes. That is why this has to run
-    # before the kit's own server starts below.
-    #
-    # This step exists because CFML engines disagree at compile time. Version 1.1.0 shipped with a
-    # cfzip call that made the module impossible to load on a default Adobe ColdFusion install, and
-    # a single-engine release could not have caught it.
+    # CFML engines can compile the same code differently. Test each engine before starting the
+    # release server below. The test servers share one port, so TestEngines.cfc runs them one at a time.
     if (-not $SkipEngineTests) {
         Write-Host "Running the test suite on every engine..." -ForegroundColor Cyan
         box run-script test:engines
@@ -113,16 +107,14 @@ try {
     if (Test-Path $ArtifactDir) { Remove-Item -Recurse -Force $ArtifactDir }
     New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
     $Zip = Join-Path $ArtifactDir "cbcloudscraper-win64.zip"
-    # ZipFile::CreateFromDirectory is used instead of Compress-Archive because Compress-Archive on
-    # Windows PowerShell writes entry names with backslashes, such as "_internal\cryptography\".
-    # The zip format says entry names use forward slashes, and a reader that follows the format
-    # cannot tell those folder entries from files. Releases up to 1.1.0 were built the broken way.
+    # Use ZipFile because Compress-Archive writes invalid backslashes in folder entry names on
+    # Windows PowerShell. ZIP entry names must use forward slashes.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $BinDir,
         $Zip,
         [System.IO.Compression.CompressionLevel]::Optimal,
-        $false   # do not add the bin\win64 folder itself as a top-level entry
+        $false   # Put the contents of bin\win64 at the root of the ZIP file.
     )
     $Hash = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLower()
     [System.IO.File]::WriteAllText("$Zip.sha256", "$Hash  cbcloudscraper-win64.zip`n", (New-Object System.Text.UTF8Encoding($false)))

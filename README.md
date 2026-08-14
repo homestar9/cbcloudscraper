@@ -21,14 +21,14 @@ challenge, such as a Turnstile widget or a managed challenge that expects a real
 case, the result may contain status `403`, `429`, or `503`. The response body may also contain a
 Cloudflare challenge page instead of the page you wanted.
 
-That said, a managed challenge is not automatically a dead end. One production application uses this
-module to download a public data file from `roc.az.gov`, which is behind a Cloudflare managed
-challenge. It gets HTTP 200 and a 12 MB CSV file, using the `curl_cffi` engine with no fallback,
-in about 3.0 seconds cold and 1.6 seconds once the `cf_clearance` cookie is stored and reused.
+A managed challenge can still succeed. One production application uses this module to download a
+public file from `roc.az.gov`. That site uses a Cloudflare managed challenge. The request returns a
+12 MB CSV file with HTTP status 200 through `curl_cffi`, without using the fallback engine. The
+request takes about 3.0 seconds without a stored cookie. It takes about 1.6 seconds after the
+application stores and reuses the `cf_clearance` cookie.
 
-That is one site, measured once. It is not a promise about any other site, and Cloudflare can
-tighten a challenge at any time. Test the module against your real target site before you depend on
-it in production.
+These results apply only to this site and test. Cloudflare can change its challenge at any time.
+Test the module with your target site before using it in production.
 
 ## Requirements
 
@@ -36,11 +36,10 @@ it in production.
 - Lucee 6+, Adobe ColdFusion 2023 or 2025, or BoxLang
 - Windows (for now)
 
-The module needs no extra Adobe ColdFusion packages. Adobe ColdFusion 2021 and later split many tags
-into separate packages that you add with `cfpm`, and the module deliberately avoids all of them. It
-unpacks its downloaded helper program through Java rather than `cfzip`, so a default Adobe install is
-enough. Version 1.1.0 and earlier did need `cfpm install zip`; if you are on one of those, either
-install that package or update the module.
+The current release needs no extra Adobe ColdFusion packages. Adobe ColdFusion provides `cfzip` in
+an optional `zip` package. This module uses Java instead, so it works on a default Adobe ColdFusion
+install. Version 1.1.0 and earlier require `cfpm install zip`. Install that package or update the
+module if you use one of those versions.
 
 The project currently publishes only a Windows version of the required binary. If you want to help me test with Linux or MacOS, please contact me.
 
@@ -283,9 +282,9 @@ Both request methods return the same struct.
 | `cookies` | An array of cookies returned by the request engine. |
 | `finalUrl` | The final URL after redirects. |
 | `engineUsed` | The engine that returned the response: `curl_cffi` or `cloudscraper`. |
-| `downloadedTo` | The path of the file that was written, when you used `downloadTo`. Empty in every other case, including when a download was skipped. This path always uses forward slashes, on every operating system. On Windows it will not compare equal to the value `expandPath()` gives you, so replace the backslashes before you compare the two. |
+| `downloadedTo` | The path written by `downloadTo`. Empty when no file was written. The path always uses forward slashes. On Windows, replace the backslashes in an `expandPath()` result before comparing the paths. |
 | `bytesWritten` | How many bytes went into that file. `0` when no file was written. |
-| `downloadStreamed` | `true` when the helper program wrote the file directly, which is the case that saves memory. `false` when no file was written, and also when the module had to write the file itself because the helper is out of date. See [Download a large file](#download-a-large-file). |
+| `downloadStreamed` | `true` only when the helper wrote the file directly without returning the full body to CFML. `false` when no file was written or an old helper returned the full body to CFML. See [Download a large file](#download-a-large-file). |
 | `executionTime` | The total request time measured by CFML, in milliseconds. |
 | `errorDetail` | A description of the operational failure. This value is empty when `ok` is true. |
 
@@ -355,21 +354,22 @@ is over an hour old.
 arrive, the helper reports an error and your target file is not touched. The module then tries the
 next engine.
 
-**An out-of-date helper still works.** A helper program older than this module does not know about
-`downloadTo`, so it returns the whole body the old way. The module notices, writes the file itself,
-and logs a warning. Your file is written either way, but none of the memory savings apply. On that
-path the file is only written for a 2xx status, whatever `downloadOnlyOn2xx` says, because CFML
-cannot tell a Cloudflare block page from a real response the way the helper can. Update the helper
-to get the savings back.
+**An out-of-date helper still works but uses more memory.** An old helper does not support
+`downloadTo`. It returns the full response body to CFML, and the module writes the file. The module
+also logs a warning. This fallback writes files only for 2xx responses, even when
+`downloadOnlyOn2xx` is `false`. The old helper cannot identify a Cloudflare block page before it
+returns the response body. Update the helper to stream the file and support the configured
+`downloadOnlyOn2xx` value.
 
-Check `result.downloadStreamed` to tell the two paths apart in code. It is `true` only when the
-helper wrote the file. Use it in a test if your application depends on the memory saving:
+Check `result.downloadStreamed` to identify the fallback. The value is `true` only when the helper
+wrote the file directly. Test this value if your application must avoid holding the full response
+body in CFML memory:
 
 ```cfc
 var result = scraper.get( url = feedURL, options = { downloadTo : target } );
 
 if ( result.ok && !result.downloadStreamed ) {
-    // The file is there, but the whole body went through heap to get it.
+    // The download succeeded, but CFML held the full response body in memory.
     log.warn( "The cbcloudscraper helper program is out of date." );
 }
 ```
@@ -454,23 +454,20 @@ well.
 
 ## Checksum verification
 
-Every release publishes the helper archive along with a `.sha256` file holding its SHA-256 checksum.
-A checksum is a short fingerprint of a file's contents. After downloading the archive, the module
-computes the archive's checksum and compares it against the published one. A mismatch means the file
-was damaged in transit or replaced by someone, so the module deletes the download and throws
-`cbcloudscraper.BinaryUnavailable`. This is on by default through the `verifyChecksum` setting.
+Each release includes the helper archive and a `.sha256` checksum file. A SHA-256 checksum is a value
+calculated from the contents of a file. The module calculates the archive's checksum and compares it
+with the published value. If the values differ, the module deletes the archive and throws
+`cbcloudscraper.BinaryUnavailable`. The `verifyChecksum` setting enables this check by default.
 
-What happens when the `.sha256` file itself cannot be read is a separate question, and that is what
-`strictChecksum` controls:
+The `strictChecksum` setting controls what happens when the `.sha256` file cannot be read:
 
-- **`strictChecksum : false`, the default.** The module logs a warning at warn level and installs
-  the helper without checking it. This keeps an application running if a release is ever published
-  without its checksum file.
-- **`strictChecksum : true`.** The module deletes the download and throws instead. Nothing runs that
-  was not checked.
+- **`strictChecksum : false`, the default.** The module logs a warning and installs the helper
+  without verifying it.
+- **`strictChecksum : true`.** The module deletes the downloaded archive and throws
+  `cbcloudscraper.BinaryUnavailable`.
 
-Turn `strictChecksum` on if an unverified executable is not acceptable in your environment. The cost
-is that a missing checksum file stops the install rather than producing a warning.
+Set `strictChecksum` to `true` if the module must never install an unverified helper. The install
+will also stop when the checksum file is missing or cannot be downloaded.
 
 ```cfc
 // config/ColdBox.cfc
@@ -586,7 +583,7 @@ Add overrides under `moduleSettings.cbcloudscraper` in your application's
 | `binaryBaseURL` | `""` | Overrides the GitHub Releases download base URL. An empty string derives the URL from `box.json`. |
 | `binaryReleaseTag` | `""` | Overrides the release tag used for the helper. An empty string uses `v` followed by the module version. |
 | `verifyChecksum` | `true` | Checks the downloaded ZIP file against its published SHA-256 checksum when the checksum is available. |
-| `strictChecksum` | `false` | Fails the download when the published SHA-256 file cannot be read, instead of warning and installing the helper anyway. See [Checksum verification](#checksum-verification). |
+| `strictChecksum` | `false` | Stops the install when the SHA-256 file cannot be read. The default logs a warning and installs the helper without verifying it. See [Checksum verification](#checksum-verification). |
 | `defaultTimeout` | `30` | Sets the default HTTP timeout in seconds. |
 | `defaultDownloadTimeout` | `300` | Used instead of `defaultTimeout` when a request sets `downloadTo` and does not set its own `timeout`. |
 | `downloadOnlyOn2xx` | `true` | Sets the module-wide default for the `downloadOnlyOn2xx` request option. |

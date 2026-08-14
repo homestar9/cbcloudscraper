@@ -11,53 +11,39 @@ Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Fixed
 
-- The module now loads on a default Adobe ColdFusion install. Unpacking the downloaded helper
-  program used the `cfzip` tag, which Adobe ColdFusion 2021 and later ship in a separate `zip`
-  package that is not installed by default. Adobe rejects a file that uses a missing package when it
-  compiles the file, not when the line runs, so the failure took down the whole module. Because
-  `BinaryProvisioner` builds `BinaryDownloader`, even an application that already had the helper
-  program installed and never downloaded anything could not resolve `CloudScraper@cbcloudscraper`.
-  The error said "The zip package is not installed" while the stack trace pointed at WireBox, which
-  made it hard to diagnose. Archives are now unpacked with `java.util.zip`, which needs no engine
-  package. This is the same reasoning that replaced `directoryCreate()` with `java.io.File.mkdirs()`
-  in 1.0.1. If you added `cfpm install zip` for this module, you no longer need it.
-- Unpacking now rejects an archive entry whose path points outside the install directory, such as
-  `../../something.exe`. `cfzip` did that check for us.
-- Fixed the release archive itself. `build\release.ps1` built it with PowerShell's
-  `Compress-Archive`, which writes folder entry names with backslashes, such as
-  `_internal\cryptography\`. The zip format says entry names use forward slashes, so a reader that
-  follows the format cannot tell those folder entries from files. `cfzip` accepted them anyway. The
-  archive is now built with `System.IO.Compression.ZipFile`, which writes correct names, and
-  unpacking also handles the old names so every already-published release still installs.
-- Unpacking now explains itself when it cannot create a directory. That case used to surface as a
-  bare `java.io.FileNotFoundException` naming a path, with nothing about why the path was missing.
+- The module now loads without Adobe ColdFusion's optional `zip` package. It uses `java.util.zip`
+  instead of `cfzip` to unpack the helper. Adobe checks for missing tag packages when it compiles a
+  file. Because of that check, the old `cfzip` call stopped the entire module from loading even when
+  the helper was already installed. You no longer need `cfpm install zip` for this module.
+- Unpacking now rejects entries such as `../../something.exe` that point outside the install
+  directory.
+- The release script now creates ZIP files with `System.IO.Compression.ZipFile`. The old
+  `Compress-Archive` command used backslashes in folder entry names, but the ZIP format requires
+  forward slashes. The unpacker also converts backslashes, so release archives through version
+  1.1.0 still install.
+- Unpacking now throws a `cbcloudscraper.BinaryUnavailable` error when it cannot create a required
+  directory. The error names the directory and explains that a file or missing write access may be
+  blocking directory creation.
 
 ### Added
 
-- Added a `downloadStreamed` key to the result struct. It is `true` when the helper program wrote
-  the file itself, which is the case that saves memory, and `false` when no file was written or when
-  the module had to write the file because the helper is older than the module. Before this, the
-  fallback was reported only as a log warning, and every other result key looked identical either
-  way, so an application could not tell that it had lost the memory saving.
-- Added a `strictChecksum` setting, default `false`. When the published `.sha256` file cannot be
-  read, the module warns and installs the helper anyway. Set this to `true` to throw instead, so
-  nothing runs that was not checked. `tasks/Binary.cfc` takes the same option as `:strict=true`.
+- Added `downloadStreamed` to the result struct. It is `true` only when the helper wrote the file
+  directly. It is `false` when no file was written or an old helper returned the full body to CFML.
+  Applications can now detect the higher-memory fallback without reading the log.
+- Added the `strictChecksum` setting. It defaults to `false`, which logs a warning and continues when
+  the `.sha256` file cannot be read. Set it to `true` to delete the unverified download and throw an
+  error. The `tasks/Binary.cfc` command uses the matching `:strict=true` flag.
 
 ### Changed
 
-- A skipped checksum check is now logged at warn level instead of info. It used to go to the same
-  progress callback as ordinary status messages, which in a running application meant `logger.info`,
-  so a download that was never checked left almost no trace in a production log.
-- `build\release.ps1` now runs the test suite on every supported engine before it publishes: Lucee 6,
-  Adobe 2023, Adobe 2025, and BoxLang CFML. A release used to test only Adobe 2023, on a server that
-  had already installed the `zip` package, which is why the `cfzip` problem above was never caught.
-  Pass `-SkipEngineTests` to skip the sweep for an urgent hotfix.
-- The README now says the module needs no Adobe `cfpm` packages, documents `downloadStreamed` and
-  `strictChecksum`, and notes that `downloadedTo` always uses forward slashes, so on Windows it does
-  not compare equal to what `expandPath()` returns.
-- The README's Important Limitations section now records that the module passes a real Cloudflare
-  managed challenge in production, with measured numbers, alongside the existing warning that it
-  cannot pass every challenge.
+- A skipped checksum check is now logged at warn level instead of info level. This makes an
+  unverified download easier to find in production logs.
+- `build\release.ps1` now tests Lucee 6, Adobe 2023, Adobe 2025, and BoxLang CFML before publishing.
+  Pass `-SkipEngineTests` to skip these tests when a release cannot wait for them.
+- The README now documents the Adobe package requirements, `downloadStreamed`, `strictChecksum`, and
+  the forward slashes used in `downloadedTo` paths.
+- The README now includes the measured result from a production request that passed one Cloudflare
+  managed challenge. The existing warning still explains that other challenges may fail.
 
 ## [1.1.0] - 2026-08-13
 

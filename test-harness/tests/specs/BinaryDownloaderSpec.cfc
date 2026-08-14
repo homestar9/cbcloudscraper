@@ -25,7 +25,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			createObject( "java", "java.io.File" ).init( arguments.path ).mkdirs();
 		};
 
-		// Write a throwaway file and return its path with forward slashes.
+		// Create a temporary file and return its path with forward slashes.
 		var tempFile = function( required string contents ){
 			var path = replace(
 				getTempDirectory() & "cbcs-spec-" & createUUID(),
@@ -133,7 +133,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				expect( warnings ).toBe( [ "careful" ] );
 				expect( progress ).toBeEmpty();
 
-				// Without a warning callback the message still reaches the caller.
+				// If onWarning is missing, warn() sends the message to onProgress.
 				downloader.warn( "", toProgress, "careful again" );
 				expect( warnings.len() ).toBe( 1 );
 				expect( progress ).toBe( [ "careful again" ] );
@@ -194,10 +194,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			} );
 
 			it( "handles folder entries named with backslashes", function(){
-				// PowerShell's Compress-Archive writes entry names with backslashes, which the zip
-				// format does not allow. Every release up to 1.1.0 was built that way, so an
-				// archive like this has to keep working. Without handling it, the folder entry is
-				// taken for a file and every entry inside that folder then fails to unpack.
+				// Releases through 1.1.0 used backslashes in ZIP entry names. Verify that these old
+				// archives still unpack correctly.
 				var zipPath = workDir & "/backslash.zip";
 				var target  = workDir & "/out";
 				variables.writeZip(
@@ -217,8 +215,8 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			} );
 
 			it( "reports a readable error when a directory cannot be created", function(){
-				// A file and a folder cannot share a name. The old code let this surface as a bare
-				// java.io.FileNotFoundException with no explanation.
+				// Create a file where the next entry needs a directory. Verify that unzip reports the
+				// conflict as a BinaryUnavailable error.
 				var zipPath = workDir & "/clash.zip";
 				var target  = workDir & "/out";
 				variables.writeZip(
@@ -238,7 +236,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 			it( "unpacks a file larger than the copy buffer without losing bytes", function(){
 				var zipPath = workDir & "/big.zip";
 				var target  = workDir & "/out";
-				// The copy buffer is 64 KB. Use more than that so the read loop runs more than once.
+				// Use more than 64 KB so the read loop runs more than once.
 				var big = repeatString( "abcdefghij", 20000 );
 				variables.writeZip( zipPath, [ { "name" : "big.txt", "contents" : big } ] );
 				makeDirs( target );
@@ -271,8 +269,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 				makePublic( downloader, "assertChecksum" );
 			} );
 
-			// Nothing listens on port 1, so the checksum request fails right away. This keeps the
-			// test off the network and off DNS, which a wildcard DNS or a proxy could interfere with.
+			// Port 1 has no listener. This URL fails without DNS or internet access.
 			var deadURL = "http://127.0.0.1:1/asset.zip";
 
 			it( "warns and continues when the published checksum cannot be read", function(){
@@ -288,7 +285,7 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 					);
 					expect( warnings.len() ).toBe( 1 );
 					expect( warnings[ 1 ] ).toInclude( "Skipping checksum verification" );
-					// The download is kept, because warning is the default behavior.
+					// Non-strict mode keeps the archive after logging a warning.
 					expect( fileExists( fakeZip ) ).toBeTrue();
 				} finally {
 					if ( fileExists( fakeZip ) ) {
@@ -318,13 +315,13 @@ component extends="coldbox.system.testing.BaseTestCase" appMapping="root" {
 	}
 
 	/**
-	 * Write a zip file containing the given entries.
+	 * Create a ZIP archive for the unzip tests.
 	 *
-	 * java.util.zip is used rather than cfzip so this test runs on a default Adobe ColdFusion
-	 * install, which does not include the zip package.
+	 * Use java.util.zip because a default Adobe ColdFusion install does not include the optional
+	 * zip package that provides cfzip.
 	 *
-	 * An array is used rather than a struct so an entry name keeps its exact spelling. A folder
-	 * entry is any entry with no "contents" key; it is written with a length of zero.
+	 * Each entry needs a name and may have contents. An entry without contents is empty. A trailing
+	 * slash in the name marks the entry as a directory.
 	 *
 	 * @zipPath Where to write the archive.
 	 * @entries An array of structs, each with a name and optional contents.

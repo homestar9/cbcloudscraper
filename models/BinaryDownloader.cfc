@@ -103,9 +103,9 @@ component singleton accessors="true" {
 	 * @verifyChecksum Verify the download's SHA-256 before using it.
 	 * @force          Download even when the cache already matches.
 	 * @onProgress     Optional callback function( message ) for progress output.
-	 * @strictChecksum Fail the download when the published checksum cannot be read. Only used when
-	 *                 verifyChecksum is true.
-	 * @onWarning      Optional callback function( message ) for warnings. Falls back to onProgress.
+	 * @strictChecksum Stop the download if the checksum file cannot be read. This setting only
+	 *                 applies when verifyChecksum is true.
+	 * @onWarning      Optional callback function( message ) for warnings. Uses onProgress when omitted.
 	 *
 	 * @return A struct with action, path, tag, and present values.
 	 */
@@ -315,16 +315,13 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Compare the archive with its published .sha256 checksum. Reject the archive when a published
-	 * checksum does not match.
+	 * Check the archive against its published SHA-256 checksum.
 	 *
-	 * When the checksum file cannot be read, the behavior depends on strictChecksum. The default is
-	 * to warn and continue, which keeps a download working if the .sha256 asset is ever missing.
-	 * With strictChecksum the download fails instead, so an application can require that every
-	 * executable it runs was checked.
+	 * If the checksum file cannot be read, strictChecksum=true deletes the archive and throws an
+	 * error. When strictChecksum=false, this method logs a warning and keeps the archive.
 	 *
-	 * The name is not "verifyChecksum" because ensure() and download() have a boolean argument
-	 * with that name, and an unscoped call would resolve to the argument instead of this method.
+	 * This method has a different name because ensure() and download() already have a verifyChecksum
+	 * argument. Inside those methods, verifyChecksum() would use the argument instead of this method.
 	 */
 	private void function assertChecksum(
 		required string zipURL,
@@ -385,20 +382,16 @@ component singleton accessors="true" {
 	/**
 	 * Unpack a zip archive into a directory.
 	 *
-	 * java.util.zip is used instead of cfzip because cfzip is not available on a default Adobe
-	 * ColdFusion install. Adobe ships that tag in a separate "zip" package that has to be added with
-	 * cfpm, and Adobe rejects the whole file when it compiles it, not when the line runs. That made
-	 * the module impossible to load at all, even for an application that already had the executable
-	 * and never downloaded anything. This is the same reasoning that replaced directoryCreate() with
-	 * java.io.File.mkdirs().
+	 * Use java.util.zip so this component works without Adobe ColdFusion's optional zip package.
+	 * Adobe checks for missing tag packages when it compiles this file. A cfzip call would stop the
+	 * module from loading even when unzip() never runs.
 	 *
 	 * @zipPath   The archive to read.
 	 * @targetDir The directory to unpack into. It must already exist.
 	 */
 	private void function unzip( required string zipPath, required string targetDir ){
 		var targetRoot = createObject( "java", "java.io.File" ).init( javacast( "string", arguments.targetDir ) );
-		// getCanonicalPath() resolves "..", symbolic links, and separator differences, so it gives a
-		// single spelling of the path that entry paths can be compared against.
+		// Resolve "..", symbolic links, and separator differences before checking entry paths.
 		var rootPath = targetRoot.getCanonicalPath();
 		var fileIn   = createObject( "java", "java.io.FileInputStream" ).init( javacast( "string", arguments.zipPath ) );
 		var zipIn    = createObject( "java", "java.util.zip.ZipInputStream" ).init( fileIn );
@@ -430,12 +423,8 @@ component singleton accessors="true" {
 		required any targetRoot,
 		required string rootPath
 	){
-		// The zip format says entry names use forward slashes, but PowerShell's Compress-Archive
-		// writes backslashes on Windows, and releases up to 1.1.0 were built that way. Java decides
-		// whether an entry is a directory by looking for a trailing forward slash, so without this
-		// normalization a folder entry such as "_internal\cryptography\" is taken for a file. The
-		// module then creates a file with that name, and every later entry inside that folder fails
-		// because its parent directory cannot be created.
+		// Releases through 1.1.0 used backslashes in ZIP entry names. Convert them because ZIP paths
+		// use forward slashes, and Java uses a trailing slash to identify a directory entry.
 		var entryName = replace( arguments.entry.getName(), "\", "/", "all" );
 		var isFolder  = arguments.entry.isDirectory() || right( entryName, 1 ) == "/";
 
@@ -445,8 +434,7 @@ component singleton accessors="true" {
 		);
 		var outPath = outFile.getCanonicalPath();
 
-		// An archive can name a path outside the target, such as "../../evil.exe". cfzip refused
-		// those entries for us, so this check has to replace it.
+		// Reject entries such as "../../evil.exe" that would write outside the target directory.
 		var separator = createObject( "java", "java.io.File" ).separator;
 		if ( outPath != arguments.rootPath && !outPath.startsWith( arguments.rootPath & separator ) ) {
 			throw(
@@ -463,8 +451,7 @@ component singleton accessors="true" {
 
 		assertDirectory( outFile.getParentFile().getCanonicalPath(), entryName );
 
-		// Copy in pieces. The archive holds a 20 MB executable, and reading an entry into one CFML
-		// variable would put the whole file in heap.
+		// Read 64 KB at a time so the 20 MB executable is not stored in one CFML variable.
 		var buffer = createObject( "java", "java.lang.reflect.Array" ).newInstance(
 			createObject( "java", "java.lang.Byte" ).TYPE,
 			javacast( "int", 65536 )
@@ -482,10 +469,8 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Create a directory while unpacking, and throw a readable error when that is not possible.
-	 *
-	 * Without this, a failure shows up later as a FileNotFoundException naming a path with no
-	 * explanation of why the path is missing.
+	 * Create a directory needed by a ZIP entry. Throw BinaryUnavailable if a file blocks the path
+	 * or the server cannot write there.
 	 *
 	 * @path      The directory to create.
 	 * @entryName The archive entry being unpacked, used in the error message.
@@ -502,8 +487,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Close a stream and ignore any error. A failure to close cannot be acted on, and throwing here
-	 * would hide the real error that sent us into the finally block.
+	 * Close a stream without throwing. A cleanup error must not replace the main result or error.
 	 */
 	private void function closeQuietly( any stream ){
 		if ( isNull( arguments.stream ) ) {
@@ -512,7 +496,7 @@ component singleton accessors="true" {
 		try {
 			arguments.stream.close();
 		} catch ( any e ) {
-			// Nothing useful to do with a close failure.
+			// Ignore the close error.
 		}
 	}
 
@@ -561,12 +545,9 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * Send a warning to the warning callback, or to the progress callback when there is no separate
-	 * warning callback.
+	 * Send a message to onWarning. Use onProgress when onWarning was not provided.
 	 *
-	 * This exists so a running application can record a warning at warn level. This component has no
-	 * logger of its own, because tasks/Binary.cfc builds it outside WireBox, so the caller supplies
-	 * the callback instead.
+	 * The caller provides callbacks because this component runs both inside and outside WireBox.
 	 */
 	private void function warn( any onWarning, any onProgress, required string message ){
 		if ( !isNull( arguments.onWarning ) && !isSimpleValue( arguments.onWarning ) ) {

@@ -147,8 +147,7 @@ component singleton accessors="true" {
 	}
 
 	/**
-	 * A callback for messages that should stand out in a production log, such as a download whose
-	 * checksum could not be checked. Progress messages go to info, which is easy to miss.
+	 * Return a callback that writes messages at warn level. Progress messages use info level.
 	 */
 	private any function warnCallback(){
 		return function( message ){

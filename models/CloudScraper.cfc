@@ -493,9 +493,8 @@ component singleton accessors="true" {
 	 * Workers with download support always return a downloadedTo key. Older workers omit that key
 	 * and return the full body as base64. Write that body to the target for backward compatibility.
 	 *
-	 * The returned "streamed" value says which path ran. It becomes the downloadStreamed result key,
-	 * so an application can tell that it did not get the memory saving instead of having to read the
-	 * log.
+	 * The streamed value is true only when the helper wrote the target file directly. It becomes the
+	 * downloadStreamed value in the public result.
 	 *
 	 * @raw     The response struct read from the executable's response file.
 	 * @request The request struct that produced this response.
@@ -548,7 +547,7 @@ component singleton accessors="true" {
 			"bodyBytes"    : binaryDecode( "", "base64" ),
 			"downloadedTo" : target,
 			"bytesWritten" : getFileInfo( target ).size,
-			// False because CFML wrote this file after holding the whole body in memory.
+			// The old helper returned the full body to CFML, so this download was not streamed.
 			"streamed"     : false
 		};
 	}
